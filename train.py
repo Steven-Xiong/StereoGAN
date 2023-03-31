@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn 
 import torch.optim as  optim
 import torch.nn.functional as F
-from models.loss import warp_loss, model_loss0
+from models.loss import warp_loss, model_loss0, PerceptualLoss, smooth_loss
 from models.dispnet import dispnetcorr
 from models.gan_nets import GeneratorResNet, Discriminator, weights_init_normal
 from dataset import ImageDataset, ValJointImageDataset
@@ -21,6 +21,8 @@ from utils.util import AverageMeter
 from utils.util import load_multi_gpu_checkpoint, load_checkpoint
 from utils.metric_utils.metrics import *
 from utils import pytorch_ssim
+from consistency import apply_disparity,generate_image_left,generate_image_right
+import cv2 as cv
 
 def val(valloader, net, writer, epoch=1, board_save=True):
     net.eval()
@@ -60,10 +62,11 @@ def train(args):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     print(device)
-    
+    # import IPython
+    # IPython.embed()
     input_shape = (3, args.img_height, args.img_width)
     net = dispnetcorr(args.maxdisp)
-    G_AB = GeneratorResNet(input_shape, 2)
+    G_AB = GeneratorResNet(input_shape, 2)    # 定义用到的generative model
     G_BA = GeneratorResNet(input_shape, 2)
     D_A = Discriminator(3)
     D_B = Discriminator(3)
@@ -117,14 +120,19 @@ def train(args):
     criterion_GAN = torch.nn.MSELoss().cuda()
     criterion_identity = torch.nn.L1Loss().cuda()
     ssim_loss = pytorch_ssim.SSIM()
+    # add perceptual
+    criterion_perceptual = PerceptualLoss().cuda()
+    #criterion_smooth = smooth_loss().cuda()
 
     # data loader
     if args.source_dataset == 'driving':
-        dataset = ImageDataset(height=args.img_height, width=args.img_width)
+        dataset = ImageDataset(height=args.img_height, width=args.img_width,left_right_consistency = args.left_right_consistency)
     elif args.source_dataset == 'synthia':
-        dataset = ImageDataset2(height=args.img_height, width=args.img_width)
+        dataset = ImageDataset2(height=args.img_height, width=args.img_width,left_right_consistency = args.left_right_consistency)
     else:
         raise "No suportive dataset"
+    # import pdb; pdb.set_trace()
+    # dataset.get_item(1)
     trainloader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
     valdataset = ValJointImageDataset()
     valloader = torch.utils.data.DataLoader(valdataset, batch_size=args.test_batch_size, shuffle=False, num_workers=1)
@@ -163,6 +171,7 @@ def train(args):
             rightB = batch['rightB'].to(device)
             dispA = batch['dispA'].unsqueeze(1).float().to(device)
             dispB = batch['dispB'].to(device) 
+            error_mapB = batch['error_mapB'].to(device)
             out_shape = (leftA.size(0), 1, args.img_height//16, args.img_width//16)
             valid = torch.cuda.FloatTensor(np.ones(out_shape))
             fake = torch.cuda.FloatTensor(np.zeros(out_shape))
@@ -211,6 +220,32 @@ def train(args):
                 loss_ssim_B = 1. - (ssim_loss(rec_leftB, leftB) + ssim_loss(rec_rightB, rightB)) / 2
                 loss_cycle = (loss_cycle_A + loss_cycle_B) / 2
                 loss_ssim = (loss_ssim_A + loss_ssim_B) / 2
+                #print('loss_ssim', loss_ssim)
+                # add cosine similarity loss
+                #import pdb; pdb.set_trace()
+                if args.cosine_similarity:
+                    #print('rec_leftA',rec_leftA.shape)
+                    #print('leftA',leftA.shape)
+                    loss_cosineA = 1- (F.cosine_similarity(rec_leftA, leftA,dim=-1).mean() + F.cosine_similarity(rec_leftA, leftA,dim=-1).mean()) / 2
+                    loss_cosineB = 1- (F.cosine_similarity(rec_leftB, leftB,dim=-1).mean() + F.cosine_similarity(rec_leftB, leftB,dim=-1).mean()) / 2
+                    loss_cosine = (loss_cosineA + loss_cosineB) /2
+                    #print(loss_cosine)
+                else:
+                    loss_cosine = 0
+                # add perceptual loss:
+                if args.perceptual:
+                    loss_perceptualA = criterion_perceptual(rec_leftA, leftA).mean() 
+                    loss_perceptualB = criterion_perceptual(rec_leftB, leftB).mean() 
+                    loss_perceptual = (loss_perceptualA + loss_perceptualB)/2
+                else:
+                    loss_perceptual = 0 
+                
+                # if args.smooth_loss:
+                #     loss_smoothA = smooth_loss(rec_leftA, leftA).mean()
+                #     loss_smoothB = smooth_loss(rec_leftB, leftB).mean()
+                #     loss_smooth = (loss_smoothA+loss_smoothB)/2
+                # else:
+                #     loss_smooth = 0
 
                 # mode seeking loss
                 if args.lambda_ms:
@@ -239,17 +274,23 @@ def train(args):
 
                 # corr loss
                 if args.lambda_corr:
+                    
                     corrB = net(leftB, rightB, extract_feat=True)
+                    #print(corrB[0].shape,corrB[1].shape)
+                    
                     corrB1 = net(leftB, rec_rightB, extract_feat=True)
                     corrB2 = net(rec_leftB, rightB, extract_feat=True)
                     corrB3 = net(rec_leftB, rec_rightB, extract_feat=True)
+                    
+                    #import pdb; pdb.set_trace()
                     loss_corr = (criterion_identity(corrB1, corrB)+criterion_identity(corrB2, corrB)+criterion_identity(corrB3, corrB))/3
                 else:
                     loss_corr = 0.
 
                 lambda_ms = args.lambda_ms * (args.total_epochs - epoch) / args.total_epochs
                 loss_G = loss_GAN + args.lambda_cycle*(args.alpha_ssim*loss_ssim+(1-args.alpha_ssim)*loss_cycle) + args.lambda_id*loss_id \
-                       + args.lambda_warp*loss_warp + args.lambda_warp_inv*loss_warp_inv + args.lambda_corr*loss_corr + lambda_ms*loss_ms 
+                       + args.lambda_warp*loss_warp + args.lambda_warp_inv*loss_warp_inv + args.lambda_corr*loss_corr + lambda_ms*loss_ms \
+                       + args.cosine_similarity * loss_cosine + args.perceptual*loss_perceptual #+ args.smooth_loss * loss_smooth
                 loss_G.backward()
                 optimizer_G.step()
 
@@ -279,12 +320,95 @@ def train(args):
             G_AB.eval()
             G_BA.eval()
             optimizer.zero_grad()
+            # import IPython
+            # IPython.embed()
+            
+            # left-right consistency
+            if args.left_right_consistency:
+                
+                #print(leftB.shape)
+                #import pdb; pdb.set_trace()
+                # leftB_flip = torch.flip(leftB,dims=[3])  #dims=2是竖直翻转？3是水平翻转
+                # rightB_flip = torch.flip(rightB,dims=[3])
+                disp_estsB = net(leftB, rightB)[0]
+                
+                mask = (dispB< args.maxdisp) & (dispB > 0)  #不用真ground-truth, 用pseudo label
+                #mask2 = (disp_estsB < args.maxdisp) & (disp_estsB > 0) 
+                mask = mask.unsqueeze(1)
+                disp_left_estsB = disp_estsB.unsqueeze(1)
+                dispB = dispB.unsqueeze(1)
+                error_mapB = error_mapB.unsqueeze(1)
+                #print(mask.shape,error_mapB.shape,disp_estsB.shape,dispB.shape)
+                #mask = torch.logical_and(mask1,mask2)
+                mask_error = error_mapB<0.01
+                mask = torch.logical_and(mask,mask_error)
+                #print(error_mapB.max(),error_mapB.min())
+                left_right_loss = F.smooth_l1_loss(disp_estsB[mask], dispB[mask],
+                                             reduction='mean')
+                                      
+                
+                '''
+                disp_estsB = net(leftB, rightB)[0]
+                leftB_flip = torch.flip(leftB,dims=[3])  #dims=2是竖直翻转？3是水平翻转
+                rightB_flip = torch.flip(rightB,dims=[3])
+                #LR consistency
+                right_to_left_disp = [- Resample2d()(disp_est_2[i], disp_est_scale[i]) for i in range(4)]
+                left_to_right_disp = [- Resample2d()(disp_est[i], disp_est_scale_2[i]) for i in range(4)]
+
+                lr_left_loss  = [torch.mean(torch.abs(right_to_left_disp[i][[0,1,6,7]] - disp_est[i][[0,1,6,7]]))  for i in range(4)]
+                lr_right_loss = [torch.mean(torch.abs(left_to_right_disp[i][[0,1,6,7]] - disp_est_2[i][[0,1,6,7]])) for i in range(4)]
+                lr_loss = sum(lr_left_loss + lr_right_loss)
+                '''
+                '''
+                disp_estsB = net(leftB, rightB)[0]
+                leftB_flip = torch.flip(leftB,dims=[3])  #dims=2是竖直翻转？3是水平翻转
+                rightB_flip = torch.flip(rightB,dims=[3])
+                est_disp_flipB = net(rightB_flip,leftB_flip)[0]
+                est_disp_flipB = torch.flip(est_disp_flipB, dims=[3])
+                est_disp_flipB[est_disp_flipB<0.0] = 0.0
+
+                disp_left_estB = disp_estsB
+                disp_right_estB = est_disp_flipB
+
+                right_left_disp = generate_image_left(est_disp_flipB,disp_estsB)
+                left_right_disp = generate_image_right(disp_estsB, est_disp_flipB)
+                lr_left_loss = F.smooth_l1_loss(right_left_disp,disp_left_estB,reduction = 'mean')
+                lr_right_loss = F.smooth_l1_loss(left_right_disp,disp_right_estB, reduction = 'mean')
+                left_right_loss = (lr_left_loss + lr_right_loss)/2
+                '''
+
+            else:
+                left_right_loss=0
+
+
             disp_ests = net(G_AB(leftA), G_AB.forward(rightA))
+            # 加自己的predA_disp跟predB_disp之间的loss
+            # if args.result_adv:
+            #     disp_estsB = net(leftB,rightB)
+            
+            #print(disp_ests)
+            #print(disp_ests.shape)
             mask = (dispA < args.maxdisp) & (dispA > 0)
+            #print(disp_ests.shape, dispA.shape)
+            #import pdb; pdb.set_trace()
             loss0 = model_loss0(disp_ests, dispA, mask)
+            
+            if args.smooth_loss:
+                #print(disp_ests[0].shape,leftA.shape, mask.shape)
+                #for i in range(3):
+                #disp_ests = disp_ests.convert('RGB')
+                #print(leftA[mask.repeat(1,3,1,1)])
+                loss_smooth_main = smooth_loss(disp_ests[0],leftA)
+            else:
+                loss_smooth_main = 0
 
             if args.lambda_disp_warp_inv:
+                #import pdb; pdb.set_trace()
                 disp_warp = [-disp_ests[i] for i in range(3)]
+                # print('disp_warp[0]:',disp_warp[0].shape)
+                # print('disp_warp[1]:',disp_warp[1].shape)
+                # print('disp_warp[2]:',disp_warp[2].shape)
+                # print('disp_warp[-4]:',disp_warp[-4].shape)
                 loss_disp_warp_inv = G_BA(rightB, disp_warp, True, [x.detach() for x in fake_leftA_feats])
                 loss_disp_warp_inv = loss_disp_warp_inv.mean()
             else:
@@ -297,7 +421,8 @@ def train(args):
             else:
                 loss_disp_warp = 0
 
-            loss = loss0 + args.lambda_disp_warp*loss_disp_warp + args.lambda_disp_warp_inv*loss_disp_warp_inv
+            loss = loss0 + args.lambda_disp_warp*loss_disp_warp + args.lambda_disp_warp_inv*loss_disp_warp_inv + args.left_right_consistency * left_right_loss + args.smooth_loss * loss_smooth_main
+                   
             loss.backward()
             optimizer.step()
 
@@ -308,6 +433,8 @@ def train(args):
                 writer.add_scalar('loss/loss_disp', loss0, train_loss_meter.count * print_freq)
                 writer.add_scalar('loss/loss_disp_warp', loss_disp_warp, train_loss_meter.count * print_freq)
                 writer.add_scalar('loss/loss_disp_warp_inv', loss_disp_warp_inv, train_loss_meter.count * print_freq)
+                writer.add_scalar('loss/loss_left_right',left_right_loss,train_loss_meter.count * print_freq)
+                writer.add_scalar('loss/loss_smooth_main', loss_smooth_main, train_loss_meter.count * print_freq)
 
                 if i % args.train_ratio_gan == 0:
                     writer.add_scalar('loss/loss_G', loss_G, train_loss_meter.count * print_freq)
@@ -320,6 +447,10 @@ def train(args):
                     writer.add_scalar('loss/loss_ms', loss_ms, train_loss_meter.count * print_freq)
                     writer.add_scalar('loss/loss_D_A', loss_D_A, train_loss_meter.count * print_freq)
                     writer.add_scalar('loss/loss_D_B', loss_D_B, train_loss_meter.count * print_freq)
+                    writer.add_scalar('loss/loss_cosine', loss_cosine, train_loss_meter.count * print_freq)
+                    writer.add_scalar('loss/loss_perceptual', loss_perceptual, train_loss_meter.count * print_freq)
+                    # writer.add_scalar('loss/loss_smooth', loss_smooth, train_loss_meter.count * print_freq)
+                    
 
                     imgA_visual = vutils.make_grid(leftA[:4,:,:,:], nrow=1, normalize=True, scale_each=True)
                     fakeB_visual = vutils.make_grid(fake_leftB[:4,:,:,:], nrow=1, normalize=True, scale_each=True)
@@ -425,5 +556,12 @@ if __name__ == '__main__':
 
     # other
     parser.add_argument('--use_multi_gpu', nargs='?', type=int, default=0, help='the number of multi gpu to use')
+
+    # self add
+    #parser.add_argument('--result_adv', type = float, default = 1)
+    parser.add_argument('--cosine_similarity', type = float, default = 1)
+    parser.add_argument('--perceptual', type = float, default =1 )
+    parser.add_argument('--smooth_loss', type = float, default = 1)
+    parser.add_argument('--left_right_consistency', type = float, default = 1)
     args = parser.parse_args()
     train(args)

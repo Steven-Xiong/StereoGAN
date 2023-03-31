@@ -1,0 +1,1 @@
+find /home/autel/xzx/Data/feng/data/sceneflow/driving/frames_finalpass '*/*/*/.png' > train.txt

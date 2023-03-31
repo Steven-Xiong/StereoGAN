@@ -17,18 +17,21 @@ def to_rgb(image):
 
 # crop to (256, 512), both left and right images, conditioned on disp
 class ImageDataset(Dataset):
-    def __init__(self, rootA='/mnt/lustre/liurui/data/driving', rootB='/mnt/lustre/liurui/data/kitti15', height=320, width=512, transforms_=None):
+    def __init__(self, rootA='/home/autel/xzx/Data/feng/data/sceneflow/driving', rootB='/home/autel/xzx/Data/feng/data/kitti_15', height=320, width=512, transforms_=None,left_right_consistency=1):
         mean = [0.5, 0.5, 0.5]
         std = [0.5, 0.5, 0.5]
         self.width = width
         self.height = height
+        self.left_right_consistency = left_right_consistency
         transforms_ = [transforms.ToTensor(),
                        transforms.Normalize(mean=mean, std=std)]
         self.transform = transforms.Compose(transforms_)
         self.rootA = rootA
         self.rootB = rootB
-        self.leftA_files, self.rightA_files, self.dispA_files = self.load_path('filenames/driving_train.txt')
-        self.leftB_files, self.rightB_files, self.dispB_files = self.load_path('filenames/kitti15_train.txt')
+        self.rootB_pseudo_label = '/home/autel/xzx/CREStereo/vis_results/CREStereo/data/pseudo_label_png'
+        self.rootB_error_map = '/home/autel/xzx/CREStereo/vis_results/CREStereo/data/error_map_pfm'
+        self.leftA_files, self.rightA_files, self.dispA_files = self.load_path('filenames/driving_adv.txt')
+        self.leftB_files, self.rightB_files, self.dispB_files = self.load_path('filenames/kitti15_adv.txt')
 
     def load_path(self, list_filename):
         lines = read_all_lines(list_filename)
@@ -61,7 +64,12 @@ class ImageDataset(Dataset):
         dispA = self.load_dispA(os.path.join(self.rootA, self.dispA_files[index]))
         leftB = self.load_image(os.path.join(self.rootB, self.leftB_files[index2]))
         rightB = self.load_image(os.path.join(self.rootB, self.rightB_files[index2]))
-        dispB = self.load_disp(os.path.join(self.rootB, self.dispB_files[index2]))
+        if self.left_right_consistency:
+            dispB = self.load_disp(os.path.join(self.rootB_pseudo_label, self.dispB_files[index2].split('/')[-1]))
+            error_mapB = self.load_dispA(os.path.join(self.rootB_error_map, self.dispB_files[index2].split('/')[-1].replace('.png','.pfm')))
+        else:
+            dispB = self.load_disp(os.path.join(self.rootB, self.dispB_files[index2]))
+            error_mapB = []
         
         crop_w, crop_h = self.width, self.height
         wA, hA = leftA.size
@@ -79,21 +87,24 @@ class ImageDataset(Dataset):
         leftB = leftB.crop((x2, y2, x2+crop_w, y2+crop_h))
         rightB = rightB.crop((x2, y2, x2+crop_w, y2+crop_h))
         dispB = dispB[y2:y2+crop_h, x2:x2+crop_w]
-
+        if self.left_right_consistency:
+            error_mapB = error_mapB[y2:y2+crop_h, x2:x2+crop_w]
+        else:
+            error_mapB = []
         # transform
         leftA = self.transform(leftA)
         rightA = self.transform(rightA)
         leftB = self.transform(leftB)
         rightB = self.transform(rightB)
-        return {"leftA": leftA, "rightA": rightA, "dispA": dispA, "leftB": leftB, "rightB": rightB, "dispB": dispB}
+        return {"leftA": leftA, "rightA": rightA, "dispA": dispA, "leftB": leftB, "rightB": rightB, "dispB": dispB, "error_mapB": error_mapB}
 
     def __len__(self):
         return len(self.leftA_files)
 
 # for validation
 class ValJointImageDataset(Dataset):
-    def __init__(self, root='/mnt/lustre/liurui/data/kitti15', transforms_=None, input_shape=(3, 384, 1280)):
-        f = open('./filenames/kitti15_val.txt', 'r')
+    def __init__(self, root='/home/autel/xzx/Data/feng/data/kitti_15', transforms_=None, input_shape=(3, 384, 1280)):
+        f = open('./filenames/kitti15_adv.txt', 'r')
         mean = [0.5, 0.5, 0.5]
         std = [0.5, 0.5, 0.5]
         channels, height, width = input_shape

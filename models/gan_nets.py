@@ -175,7 +175,9 @@ class GeneratorResNet(nn.Module):
         self.out_layer = nn.Sequential(*out_layer)
 
     def forward(self, x, offset=None, extract_feat=False, feat_gt=None, zx=False, zx_relax=None):
-        num, _, height, width = x.size()
+        num, _, height, width = x.size()  #[2,3,256,512] 2是gpu num
+        #print(x.size())
+        #import pdb; pdb.set_trace()
         x = self.model(x)
         x1 = self.up1(x)
         x2 = self.up2(x1)

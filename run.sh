@@ -1,9 +1,9 @@
 #!/bin/bash
 
 now=$(date +"%Y%m%d_%H%M%S")
-model_name="StereoGAN_maxdisp192_cycle10_id5_corr1_ms1e-1_invwarp5_invdispwarp5_imwidth512_height256_ep100_lr1e-5_gan2e-5"
+model_name="StereoGAN_maxdisp192_cycle10_id5_corr1_ms1e-1_invwarp5_invdispwarp5_imwidth512_height256_ep100_lr1e-5_gan2e-5_left_right_consistency_crestereo_thresh0.01"
 
-CUDA_VISIBLE_DEVICES=0,1,2,3 python -u train.py \
+python -u train.py \
 --model_type='dispnetc' \
 --source_dataset='driving' \
 --batch_size=4 \
@@ -14,9 +14,9 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python -u train.py \
 --total_epochs=101 \
 --save_interval=5 \
 --print_freq=220 \
---checkpoint_save_path="checkpoints/${model_name}" \
+--checkpoint_save_path="stereogan_checkpoints/${model_name}" \
 --writer=${model_name} \
---use_multi_gpu=4 \
+--use_multi_gpu=2 \
 --img_height=256 \
 --img_width=512 \
 --maxdisp=192 \
@@ -26,4 +26,8 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python -u train.py \
 --lambda_ms=0.1 \
 --lambda_warp_inv=5 \
 --lambda_disp_warp_inv=5 \
+--cosine_similarity=0 \
+--perceptual=0 \
+--smooth_loss=0 \
+--left_right_consistency=1 \
 2>&1 | tee ./logs/train-$model_name-$now.log &
