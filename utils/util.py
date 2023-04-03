@@ -8,7 +8,7 @@ import torch.nn as nn
 import numpy as np
 import torch.nn.functional as F
 import os
-
+import cv2
 
 flag_check_shape = False
 flag_bn = False ## default use bn or not
@@ -55,6 +55,58 @@ def pfm_imread(filename):
     data = np.reshape(data, shape)
     data = np.flipud(data)
     return data, scale
+
+# add from unimatch
+def readflow_driving(file):
+    file = open(file, 'rb')
+
+    color = None
+    width = None
+    height = None
+    scale = None
+    endian = None
+
+    header = file.readline().rstrip()
+    if header == b'PF':
+        color = True
+    elif header == b'Pf':
+        color = False
+    else:
+        raise Exception('Not a PFM file.')
+
+    dim_match = re.match(rb'^(\d+)\s(\d+)\s$', file.readline())
+    if dim_match:
+        width, height = map(int, dim_match.groups())
+    else:
+        raise Exception('Malformed PFM header.')
+
+    scale = float(file.readline().rstrip())
+    if scale < 0:  # little-endian
+        endian = '<'
+        scale = -scale
+    else:
+        endian = '>'  # big-endian
+
+    data = np.fromfile(file, endian + 'f')
+    shape = (height, width, 3) if color else (height, width)
+
+    data = np.reshape(data, shape)
+    data = np.flipud(data)
+    # add from read_gen function
+    flow = data.astype(np.float32)
+    
+    if len(flow.shape) == 2:
+            return flow
+    else:
+        return flow[:, :, :-1]
+    return flow
+# add from unimatch
+def readFlowKITTI(filename):
+    flow = cv2.imread(filename, cv2.IMREAD_ANYDEPTH | cv2.IMREAD_COLOR)
+    flow = flow[:, :, ::-1].astype(np.float32)
+    flow, valid = flow[:, :, :2], flow[:, :, 2]
+    flow = (flow - 2 ** 15) / 64.0
+    return flow, valid
 
 
 def msg_conv(obj_in, obj_conv, obj_out):

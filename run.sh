@@ -1,7 +1,7 @@
 #!/bin/bash
 
 now=$(date +"%Y%m%d_%H%M%S")
-model_name="StereoGAN_maxdisp192_cycle10_id5_corr1_ms1e-1_invwarp5_invdispwarp5_imwidth512_height256_ep100_lr1e-5_gan2e-5_left_right_consistency_crestereo_thresh0.01"
+model_name="StereoGAN_maxdisp192_cycle10_id5_corr1_ms1e-1_invwarp5_invdispwarp5_imwidth512_height256_ep100_lr1e-5_gan2e-5_addflow"
 
 python -u train.py \
 --model_type='dispnetc' \
@@ -29,5 +29,11 @@ python -u train.py \
 --cosine_similarity=0 \
 --perceptual=0 \
 --smooth_loss=0 \
---left_right_consistency=1 \
+--left_right_consistency=0 \
+--flow=1 \
+--num_scales 2 \
+--upsample_factor 4 \
+--attn_splits_list 2 8 \
+--corr_radius_list -1 4 \
+--prop_radius_list -1 1 \
 2>&1 | tee ./logs/train-$model_name-$now.log &

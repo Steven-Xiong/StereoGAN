@@ -47,7 +47,7 @@ def val(valloader, net, writer, epoch=1, board_save=True):
         writer.add_scalar("val/Thres2", Thres1s/i, epoch)
         writer.add_scalar("val/Thres4", Thres2s/i, epoch)
         writer.add_scalar("val/Thres5", Thres3s/i, epoch)
-    return EPEs/i, D1s/i, Thresh1s/i,Thresh2s/i,Thres3s/i
+    return EPEs/i, D1s/i
 
 def train(args):
     writer = SummaryWriter(comment=args.writer)
@@ -78,15 +78,7 @@ def train(args):
                      reg_refine=args.reg_refine,
                      task=args.task)
 
-    G_AB = GeneratorResNet(input_shape, 2)    # 定义用到的generative model
-    G_BA = GeneratorResNet(input_shape, 2)
-    D_A = Discriminator(3)
-    D_B = Discriminator(3)
-    # if args.flow:
-    #     G_A_forward = GeneratorResNet(input_shape,2)   #加前向后向生成
-    #     G_A_backward = GeneratorResNet(input_shape,2)
-    #     D_A_forward = Discriminator(3)
-    #     D_A_backward = Discriminator(3)
+    
     if args.load_checkpoints:
         if args.load_from_mgpus_model:
             if args.load_dispnet_path:
@@ -113,41 +105,26 @@ def train(args):
                 net = load_checkpoint(net, args.load_checkpoint_path, device)
             else:
                 net.apply(weights_init_normal)
-            if args.load_flownet_path:
+            if args.load_dispnet_path:
                 net_flow = load_checkpoint(net_flow, args.load_checkpoint_path, device)
             else:
                 net_flow.apply(weights_init_normal)   #可能有问题？
-            G_AB = load_checkpoint(G_AB, args.load_gan_path, 'G_AB')
-            G_BA = load_checkpoint(G_BA, args.load_gan_path, 'G_BA')
-            D_A = load_checkpoint(D_A, args.load_gan_path, 'D_A')
-            D_B = load_checkpoint(D_B, args.load_gan_path, 'D_B')
-
-            # G_A_forward = load_checkpoint(G_A_forward, args.load_gan_path,'G_A_forward')
-            # G_A_backward = load_checkpoint(G_A_backward, args.load_gan_path,'G_A_backward')
-            # D_A_forward = load_checkpoint(D_A_forward, args.load_gan_path,'D_A_forward')
-            # D_A_backward = load_checkpoint(D_A_backward,args.load_gan_path,'D_A_backward')
+            
 
     else:
         net.apply(weights_init_normal)
-        G_AB.apply(weights_init_normal)
-        G_BA.apply(weights_init_normal)
-        D_A.apply(weights_init_normal)
-        D_B.apply(weights_init_normal)
+        
 
         if args.flow:
             net_flow.apply(weights_init_normal)
-            # G_A_forward.apply(weights_init_normal)
-            # G_A_backward.apply(weights_init_normal)
-            # D_A_forward.apply(weights_init_normal)
-            # D_B_forward.apply(weights_init_normal)
-
+           
     # optimizer = optim.SGD(params, momentum=0.9)
     optimizer = optim.Adam(net.parameters(), lr=args.lr_rate, betas=(0.9, 0.999))
     optimizer_G = optim.Adam(itertools.chain(G_AB.parameters(), G_BA.parameters()), lr=args.lr_gan, betas=(0.5, 0.999))
     optimizer_D_A = optim.Adam(D_A.parameters(), lr=args.lr_gan, betas=(0.5, 0.999))
     optimizer_D_B = optim.Adam(D_B.parameters(), lr=args.lr_gan, betas=(0.5, 0.999))
     if args.flow:
-        optimizer_flow = optim.Adam(net_flow.parameters(), lr=args.lr_rate, betas=(0.9, 0.999))
+        optimizer_flow = optim.Adam(net.parameters(), lr=args.lr_rate, betas=(0.9, 0.999))
         # optimizer_G_flow = optim.Adam(itertools.chain(G_A_forward.parameters(), G_A_backward.parameters()), lr=args.lr_gan, betas=(0.5, 0.999))
         # optimizer_D_forward = optim.Adam(D_A_forward.parameters(), lr=args.lr_gan, betas=(0.5, 0.999))
         # optimizer_D_backward = optim.Adam(D_A_backward.parameters(), lr=args.lr_gan, betas=(0.5, 0.999))
@@ -224,10 +201,6 @@ def train(args):
             lr = lr / int(args.lrepochs.split(':')[1])
         for param_group in optimizer.param_groups:
             param_group['lr'] = lr
-        # add flow
-        if args.flow:
-            for param_group in optimizer_flow.param_groups:
-                param_group['lr'] = lr
 
         for i, batch in enumerate(trainloader):
             n_iter += 1
@@ -243,8 +216,6 @@ def train(args):
             leftB_forward = batch['leftB_forward'].to(device)
             flowA = batch['flowA'].to(device)
             flowB = batch['flowB'].to(device)
-            #validA = batch['validA'].to(device)
-            validB = batch['validB'].to(device)
             out_shape = (leftA.size(0), 1, args.img_height//16, args.img_width//16)
             valid = torch.cuda.FloatTensor(np.ones(out_shape))
             fake = torch.cuda.FloatTensor(np.zeros(out_shape))
@@ -255,8 +226,7 @@ def train(args):
                 G_BA.train()
                 net.eval()
                 optimizer_G.zero_grad()
-                if args.flow:
-                    net_flow.eval()
+                
                 # Identity loss
                 loss_id_A = (criterion_identity(G_BA(leftA), leftA) + criterion_identity(G_BA(rightA), rightA)) / 2
                 loss_id_B = (criterion_identity(G_AB(leftB), leftB) + criterion_identity(G_AB(rightB), rightB)) / 2
@@ -390,9 +360,6 @@ def train(args):
             G_AB.eval()
             G_BA.eval()
             optimizer.zero_grad()
-            if args.flow:
-                net_flow.train()
-                optimizer_flow.zero_grad()
             # import IPython
             # IPython.embed()
             
@@ -400,7 +367,7 @@ def train(args):
             if args.left_right_consistency:
                 
                 #print(leftB.shape)
-                import pdb; pdb.set_trace()
+                #import pdb; pdb.set_trace()
                 # leftB_flip = torch.flip(leftB,dims=[3])  #dims=2是竖直翻转？3是水平翻转
                 # rightB_flip = torch.flip(rightB,dims=[3])
                 disp_estsB = net(leftB, rightB)[0]
@@ -485,14 +452,14 @@ def train(args):
                                                         # flow_gt shape:[1,2,320,1152] valid shape:[1,320,1152]
                 
                 
-                flowA = flowA.permute(0,3,1,2)
-                #print('flowA.shape:',flowA.shape)
-                #print('flow_preds.shape:',flow_preds[0].shape, len(flow_preds))
-                #print(flowA[0,0].shape, flowA[0,1].shape)
-                validA = (flowA[:,0,:,:].abs() < 1000) & (flowA[:,1,:,:].abs() < 1000)
-                validA = validA.float()  #解决这里
-                #print('validA.shape',validA.shape)
-                loss_flow, metrics = flow_loss_func(flow_preds, flowA, validA,
+                #flowA = flowA.permute(0,3,1,2)
+                print('flowA.shape:',flowA.shape)
+                print('flow_preds.shape:',flow_preds[0].shape, len(flow_preds))
+
+                valid = (flowA[2].abs() < 1000) & (flowA[1].abs() < 1000)
+                valid = valid.float()  #解决这里
+                print('valid.shpae',valid.shape)
+                loss_flow, metrics = flow_loss_func(flow_preds, flowA, valid,
                                             gamma=args.gamma,
                                             max_flow=args.max_flow,
                                             )
@@ -530,8 +497,6 @@ def train(args):
                    
             loss.backward()
             optimizer.step()
-            if args.flow:
-                optimizer_flow.step()
 
             if i % print_freq == print_freq - 1:
                 print('epoch[{}/{}]  step[{}/{}]  loss: {}'.format(epoch, args.total_epochs, i, len(trainloader), loss.item() ))
@@ -598,33 +563,17 @@ def train(args):
                     writer.add_image('warp/fakeB_R_warp', fakeB_warp_R_visual, i)
                     recA_warp_R_visual = vutils.make_grid(rec_rightA_warp[0][:4,:,:,:], nrow=1, normalize=True, scale_each=True)
                     fakeB_warp_R_visual = vutils.make_grid(fake_rightB_warp[0][:4,:,:,:], nrow=1, normalize=True, scale_each=True)
-        # TODO: 加 optical flow的evaluation metrics,看能不能相互促进
+
         with torch.no_grad():
-            EPE, D1,Thres1s,Thres2s,Thres3s = val(valloader, net, writer, epoch=epoch, board_save=True)
+            EPE, D1 = val(valloader, net, writer, epoch=epoch, board_save=True)
 
         t1 = time.time()   #to do: add other evaluation metrics
-        print('epoch:{}, D1:{:.4f}, EPE:{:.4f},Thres2s:{:.4f},Thres4s:{:.4f},Thres5s:{:.4f}, cost time:{} '.format(epoch, D1, EPE,Thres1s,Thres2s,Thres3s, t1-t))
+        print('epoch:{}, D1:{:.6f}, EPE:{:.6f}, cost time:{} '.format(epoch, D1, EPE, t1-t))
 
         if (epoch % args.save_interval == 0) or D1 < best_val_d1 or EPE < best_val_epe:
             best_val_d1 = D1
             best_val_epe = EPE
-            if args.flow:
-                torch.save({
-                            'epoch': epoch,
-                            'G_AB': G_AB.state_dict(),
-                            'G_BA': G_BA.state_dict(),
-                            'D_A': D_A.state_dict(),
-                            'D_B': D_B.state_dict(),
-                            'model': net.state_dict(),
-                            'model_flow':net_flow.state_dict(),
-                            'optimizer_DA_state_dict': optimizer_D_A.state_dict(),
-                            'optimizer_DB_state_dict': optimizer_D_B.state_dict(),
-                            'optimizer_G_state_dict': optimizer_G.state_dict(),
-                            'optimizer_state_dict': optimizer.state_dict(),
-                            'optimizer_flow_state_dict':optimizer_flow.state_dict(),
-                            }, args.checkpoint_save_path + '/ep' + str(epoch) + '_D1_{:.4f}_EPE{:.4f}_Thres2s{:.4f}_Thres4s{:.4f}_Thres5s{:.4f}'.format(D1, EPE,Thres1s,Thres2s,Thres3s) + '.pth.rar')
-            else:
-                torch.save({
+            torch.save({
                         'epoch': epoch,
                         'G_AB': G_AB.state_dict(),
                         'G_BA': G_BA.state_dict(),
@@ -635,7 +584,8 @@ def train(args):
                         'optimizer_DB_state_dict': optimizer_D_B.state_dict(),
                         'optimizer_G_state_dict': optimizer_G.state_dict(),
                         'optimizer_state_dict': optimizer.state_dict(),
-                        }, args.checkpoint_save_path + '/ep' + str(epoch) + '_D1_{:.4f}_EPE{:.4f}_Thres2s{:.4f}_Thres4s{:.4f}_Thres5s{:.4f}'.format(D1, EPE,Thres1s,Thres2s,Thres3s) + '.pth.rar')
+                        }, args.checkpoint_save_path + '/ep' + str(epoch) + '_D1_{:.4f}_EPE{:.4f}'.format(D1, EPE) + '.pth.rar')
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Hyperparams')
