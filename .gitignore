@@ -4,3 +4,4 @@ runs
 data
 __pycache__
 models/__pycache__
+logs
