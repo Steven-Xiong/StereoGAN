@@ -108,7 +108,12 @@ def readFlowKITTI(filename):
     flow = (flow - 2 ** 15) / 64.0
     return flow, valid
 
-
+def writeFlowKITTI(filename, uv):
+    uv = 64.0 * uv + 2**15
+    valid = np.ones([uv.shape[0], uv.shape[1], 1])
+    uv = np.concatenate([uv, valid], axis=-1).astype(np.uint16)
+    cv2.imwrite(filename, uv[..., ::-1])
+    
 def msg_conv(obj_in, obj_conv, obj_out):
     return "\n input: %s\n conv: %s\n output: %s\n" % (str(obj_in.shape), str(obj_conv), str(obj_out.shape))
 
@@ -605,6 +610,7 @@ class Octave_conv(nn.Module):
 
 def load_multi_gpu_checkpoint(net, pkl_path, name):
     print(pkl_path)
+    #import pdb; pdb.set_trace()
     pretrained_dict = torch.load(pkl_path)[name]
     net = nn.DataParallel(net)
     model_dict = net.state_dict()
@@ -619,6 +625,14 @@ def load_multi_gpu_checkpoint(net, pkl_path, name):
     #net = net.module
     #print('val loss: {}'.format(state['val_loss']))
     return net
+
+def load_multi_gpu_optimizer(pkl_path, name):
+    print(pkl_path)
+    #import pdb; pdb.set_trace()
+    optimizer_dict = torch.load(pkl_path)[name]
+    
+    return optimizer_dict
+
 
 def load_checkpoint(net, pkl_path, dst_device):
     state = torch.load(pkl_path, map_location=dst_device)

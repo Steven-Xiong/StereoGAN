@@ -2,7 +2,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch
 from .bilinear_sampler import bilinear_sampler
-from .loss import warp_loss
+from .loss import warp_loss, warp_loss_unimatch
 
 def weights_init_normal(m):
     classname = m.__class__.__name__
@@ -211,6 +211,124 @@ class GeneratorResNet(nn.Module):
                     y1 = bilinear_sampler(x1, F.max_pool2d(offset,2,2)/2, 'zeros')
                     y2 = bilinear_sampler(x2, offset, 'zeros')
                 if feat_gt is not None:
+                    # if args.unimatch_stereo:
+                    # loss_warp = warp_loss_unimatch(y,feat_gt,weights=[1.0])
+                    # return bilinear_sampler(self.out_layer(x2), offset, 'zeros'), loss_warp
+                    # else:
+                    loss_warp = warp_loss([y, y1, y2], feat_gt, weights=[0.5,0.5,0.7])
+                    return bilinear_sampler(self.out_layer(x2), offset, 'zeros'), loss_warp
+                return bilinear_sampler(self.out_layer(x2), offset, 'zeros'), [y, y1, y2]
+            return bilinear_sampler(self.out_layer(x2), offset, 'zeros')
+        if extract_feat:
+            return self.out_layer(x2), [x, x1, x2]
+        return self.out_layer(x2)
+
+    def forward_R(self, x):
+        num, _, height, width = x.size()
+        x = self.model(x)
+        z = torch.randn(num, 1, height//4, width//4).cuda() * 0.01
+        k = torch.cuda.LongTensor(1).random_(0, x.size(1))
+        x[:, [k], :, :] = x[:, [k], :, :] + z
+        x1 = self.up1(x)
+        x2 = self.up2(x1)
+        return self.out_layer(x2)
+
+class GeneratorResNet_debug(nn.Module):
+    def __init__(self, input_shape, num_residual_blocks):
+        super(GeneratorResNet_debug, self).__init__()
+
+        channels = input_shape[0]
+
+        # Initial convolution block
+        out_features = 64
+        model = [
+            nn.ReflectionPad2d(3),
+            nn.Conv2d(channels, out_features, 7),
+            nn.InstanceNorm2d(out_features),
+            nn.ReLU(inplace=True),
+        ]
+        in_features = out_features
+
+        # Downsampling
+        for _ in range(2):
+            out_features *= 2
+            model += [
+                nn.Conv2d(in_features, out_features, 3, stride=2, padding=1),
+                nn.InstanceNorm2d(out_features),
+                nn.ReLU(inplace=True),
+            ]
+            in_features = out_features
+
+        # Residual blocks
+        for _ in range(num_residual_blocks):
+            model += [ResidualBlock(out_features)]
+        self.model = nn.Sequential(*model)
+
+        # Upsampling
+        out_features //= 2
+        self.up1 = nn.Sequential(
+            nn.Upsample(scale_factor=2),
+            nn.Conv2d(in_features, out_features, 3, stride=1, padding=1),
+            nn.InstanceNorm2d(out_features),
+            nn.ReLU(inplace=True)
+        )
+        in_features = out_features
+        out_features //= 2
+        self.up2 = nn.Sequential(
+                nn.Upsample(scale_factor=2),
+                nn.Conv2d(in_features, out_features, 3, stride=1, padding=1),
+                nn.InstanceNorm2d(out_features),
+                nn.ReLU(inplace=True)
+        )
+        in_features = out_features
+
+        # Output layer
+        #model += [nn.ReflectionPad2d((1,1,1,0)), nn.Conv2d(out_features, channels, 3, stride=1), nn.Tanh()]
+        out_layer = [nn.ReflectionPad2d(3), nn.Conv2d(out_features, channels, 7, stride=1), nn.Tanh()]
+
+        self.out_layer = nn.Sequential(*out_layer)
+
+    def forward(self, x, offset=None, extract_feat=False, feat_gt=None, zx=False, zx_relax=None):
+        num, _, height, width = x.size()  #[2,3,256,512] 2是gpu num
+        #print(x.size())
+        #import pdb; pdb.set_trace()
+        x = self.model(x)  #[1,256,64,128] 1是gpu num
+        x1 = self.up1(x)   #[1,128,128,256]
+        x2 = self.up2(x1)  #[1,64,256,512]
+        if zx: 
+            z = torch.randn(num, 1, height//4, width//4).cuda() * 0.01
+            k = torch.cuda.LongTensor(1).random_(0, x.size(1))
+            x_a = x.clone()
+            x_a[:, [k], :, :] = x_a[:, [k], :, :] + z
+            x1_a = self.up1(x_a)
+            x2_a = self.up2(x1_a)
+            out = self.out_layer(x2)
+            out_a = self.out_layer(x2_a)
+            lz = torch.mean(torch.abs(out-out_a)) / torch.mean(torch.abs(z))
+            if zx_relax:
+                loss_lz = torch.abs(1/(lz+1e-5) - 0)
+            elif zx_relax is False:
+                loss_lz = lz
+            else:
+                raise "Non-supportive relax"
+            return loss_lz
+        if offset is not None:
+            if extract_feat:
+                if len(offset) == 3: #对应flow_warp
+                    y = bilinear_sampler(x, offset[-1], 'zeros')
+                    y1 = bilinear_sampler(x1, offset[-2], 'zeros')
+                    y2 = bilinear_sampler(x2, offset[-3], 'zeros')
+                    loss_warp = warp_loss([y, y1, y2], feat_gt, weights=[0.5,0.5,0.7])
+                    return loss_warp
+                else:
+                    y = bilinear_sampler(x, F.max_pool2d(offset,4,4)/4, 'zeros')
+                    y1 = bilinear_sampler(x1, F.max_pool2d(offset,2,2)/2, 'zeros')
+                    y2 = bilinear_sampler(x2, offset, 'zeros')
+                if feat_gt is not None:
+                    # if args.unimatch_stereo:
+                    # loss_warp = warp_loss_unimatch(y,feat_gt,weights=[1.0])
+                    # return bilinear_sampler(self.out_layer(x2), offset, 'zeros'), loss_warp
+                    # else:
                     loss_warp = warp_loss([y, y1, y2], feat_gt, weights=[0.5,0.5,0.7])
                     return bilinear_sampler(self.out_layer(x2), offset, 'zeros'), loss_warp
                 return bilinear_sampler(self.out_layer(x2), offset, 'zeros'), [y, y1, y2]

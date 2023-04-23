@@ -63,3 +63,26 @@ def Thres_metric(D_est, D_gt, mask, thres):
 def EPE_metric(D_est, D_gt, mask):
     D_est, D_gt = D_est[mask], D_gt[mask]
     return F.l1_loss(D_est, D_gt, size_average=True)
+
+# add flow evaluation metrics
+def compute_flow_error(gt_flow, pred_flow, mask):
+    H, W, _ = gt_flow.shape
+    old_H, old_W, _ = pred_flow.shape
+    # Reshape predicted flow to have same size as ground truth
+    pred0 = cv2.resize(pred_flow[:,:,0], (W, H), interpolation=cv2.INTER_LINEAR) * (1.0*W/old_W)
+    pred1 = cv2.resize(pred_flow[:,:,1], (W, H), interpolation=cv2.INTER_LINEAR) * (1.0*H/old_H)
+    pred = np.stack((pred0, pred1), axis=-1) * FLOW_SCALE
+
+    err = np.sqrt(np.sum(np.square(gt_flow - pred), axis=-1))
+    err_valid = np.sum(err * mask) / np.sum(mask)
+
+    gt_mag = np.sqrt(np.sum(np.square(gt_flow), axis=-1))
+    mask1 = err > 3.
+    mask2 = err / (gt_mag+1e-12) > 0.05
+    final_mask = np.logical_and(np.logical_and(mask1, mask2), mask)
+    f1 = final_mask.sum()/mask.sum()
+
+    return err_valid, pred, f1
+
+def EPE(input_flow, target_flow):
+    return torch.norm(target_flow-input_flow,p=2,dim=1).mean()

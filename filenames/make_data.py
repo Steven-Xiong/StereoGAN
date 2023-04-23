@@ -82,7 +82,7 @@ with open(os.path.join(filepath,'kitti15_adv_flow.txt'),'a') as f:
         f.write(right_img1+' ')
         disp_img1 = left_img1.replace('image_2','disp_occ_0')
         f.write(disp_img1+' ')
-        left_img2 = os.path.join(left_name1.split('/')[-3],left_name1.split('/')[-2],left_name1.split('/')[-1])
+        left_img2 = os.path.join(left_name2.split('/')[-3],left_name2.split('/')[-2],left_name2.split('/')[-1])
         f.write(left_img2 + ' ')
         flow = left_img1.replace('image_2','flow_occ')
         f.write(flow + '\n')

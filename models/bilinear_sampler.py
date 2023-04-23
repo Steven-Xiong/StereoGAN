@@ -126,3 +126,14 @@ class BilinearSampler(nn.Module):
 #    print(net.w.data)
 #
 ##print(y)
+
+            
+def downsample_optical_flow(flow_tensor, downsample_factor=1/2, num_downsample=3):
+    downscaled_flows = []
+    #downscaled_flows.append(flow_tensor)
+    for i in range(num_downsample):
+        downscaled_flow = F.interpolate(flow_tensor, scale_factor = downsample_factor**i, 
+            mode='bilinear', align_corners=True) * downsample_factor
+        downscaled_flows.append(downscaled_flow)
+
+    return downscaled_flows

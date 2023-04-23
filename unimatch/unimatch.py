@@ -348,6 +348,7 @@ class UniMatch(nn.Module):
                                     flow_up = depth_up_pad[:, :1]  # [B, 1, H, W]
 
                             else:
+                                import pdb; pdb.set_trace()
                                 flow_up = upsample_flow_with_mask(flow, up_mask, upsample_factor=self.upsample_factor,
                                                                   is_depth=task == 'depth')
 

@@ -38,6 +38,15 @@ def warp_loss(gen, real, weights=[0.5,0.5,0.7]):
         all_losses.append(weight * (m * F.l1_loss(g, r, reduction='none').mean(1)).mean())
     return sum(all_losses)
 
+def warp_loss_unimatch(gen, real, weights=[1.0]):
+    #weights = [0.5, 0.5, 0.7, 1.0]
+    all_losses = []
+    for g0, r, weight in zip(gen, real, weights):
+        # g, m = g0
+        # m = m.float()
+        all_losses.append(weight * (F.l1_loss(gen, real, reduction='none').mean(1)).mean())
+    return sum(all_losses)
+
 # 加perceptual loss
 
 IMAGENET_MEAN = torch.FloatTensor([0.485, 0.456, 0.406])[None, :, None, None]
@@ -191,6 +200,46 @@ def flow_loss_func(flow_preds, flow_gt, valid,
         '1px': (epe > 1).float().mean().item(),
         '3px': (epe > 3).float().mean().item(),
         '5px': (epe > 5).float().mean().item(),
+    }
+
+    return flow_loss, metrics
+
+def flow_loss_func_val(flow_preds, flow_gt, valid,
+                   gamma=0.9,
+                   max_flow=400,
+                   **kwargs,
+                   ):
+    n_predictions = len(flow_preds)
+    flow_loss = 0.0
+
+    # exlude invalid pixels and extremely large diplacements
+    mag = torch.sum(flow_gt ** 2, dim=1).sqrt()  # [B, H, W]
+    # print('mag.shape:',mag.shape)
+    # print(valid.shape)
+    valid = (valid >= 0.5) & (mag < max_flow)
+
+    for i in range(n_predictions):
+        i_weight = gamma ** (n_predictions - i - 1)
+
+        i_loss = (flow_preds[i] - flow_gt).abs()
+
+        flow_loss += i_weight * (valid[:, None] * i_loss).mean()
+
+    epe = torch.sum((flow_preds[-1] - flow_gt) ** 2, dim=1).sqrt()
+
+    if valid.max() < 0.5:
+        pass
+    
+    out = ((epe > 3.0) & ((epe / mag) > 0.05)).float()
+    epe = epe.view(-1)[valid.view(-1)]
+    fl_all = out[valid]
+
+    metrics = {
+        'epe': epe.mean().item(),
+        '1px': (epe > 1).float().mean().item(),
+        '3px': (epe > 3).float().mean().item(),
+        '5px': (epe > 5).float().mean().item(),
+        'fl_all': fl_all.float().mean().item()
     }
 
     return flow_loss, metrics

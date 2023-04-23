@@ -1,3 +1,5 @@
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)
 import time
 import os
 import argparse
@@ -10,32 +12,44 @@ import torch
 import torch.nn as nn 
 import torch.optim as  optim
 import torch.nn.functional as F
-from models.loss import warp_loss, model_loss0, PerceptualLoss, smooth_loss,flow_loss_func
+from models.loss import warp_loss, model_loss0, PerceptualLoss, smooth_loss,flow_loss_func,flow_loss_func_val
 from models.dispnet import dispnetcorr
-from models.gan_nets import GeneratorResNet, Discriminator, weights_init_normal
+from models.gan_nets import GeneratorResNet,GeneratorResNet_debug, Discriminator, weights_init_normal
 from unimatch.unimatch import UniMatch
 from dataset import ImageDataset, ValJointImageDataset
 
 from tensorboardX import SummaryWriter
 import torchvision.utils as vutils
 from utils.util import AverageMeter
-from utils.util import load_multi_gpu_checkpoint, load_checkpoint
+from utils.util import load_multi_gpu_checkpoint, load_checkpoint, load_multi_gpu_optimizer
 from utils.metric_utils.metrics import *
 from utils import pytorch_ssim
 from consistency import apply_disparity,generate_image_left,generate_image_right
 import cv2 as cv
+#自己写的downsample
+from models.bilinear_sampler import downsample_optical_flow
 
 def val(valloader, net, writer, epoch=1, board_save=True):
     net.eval()
     EPEs, D1s, Thres1s, Thres2s, Thres3s = 0, 0, 0, 0, 0
     i = 0
-    for left_img, right_img, disp_gt in valloader:
+    for left_img, right_img, disp_gt, left_forward, flow, valid in valloader:
         left_img = left_img.cuda()
         right_img = right_img.cuda()
         disp_gt = disp_gt.cuda()
         i = i + 1
         mask = (disp_gt < args.maxdisp) & (disp_gt > 0)
-        disp_est = net(left_img, right_img)[0].squeeze(1)
+        if args.unimatch_stereo:
+            disp_est = net(left_img, right_img,
+                               attn_type=args.attn_type,
+                               attn_splits_list=args.attn_splits_list,
+                               corr_radius_list=args.corr_radius_list,
+                               prop_radius_list=args.prop_radius_list,
+                               num_reg_refine=args.num_reg_refine,
+                               task='stereo',
+                               )['flow_preds'][-1]
+        else:
+            disp_est = net(left_img, right_img)[0].squeeze(1)
         EPEs += EPE_metric(disp_est, disp_gt, mask)
         D1s += D1_metric(disp_est, disp_gt, mask)
         Thres1s += Thres_metric(disp_est, disp_gt, mask, 2.0)
@@ -47,7 +61,147 @@ def val(valloader, net, writer, epoch=1, board_save=True):
         writer.add_scalar("val/Thres2", Thres1s/i, epoch)
         writer.add_scalar("val/Thres4", Thres2s/i, epoch)
         writer.add_scalar("val/Thres5", Thres3s/i, epoch)
-    return EPEs/i, D1s/i, Thresh1s/i,Thresh2s/i,Thres3s/i
+    return EPEs/i, D1s/i, Thres1s/i,Thres2s/i,Thres3s/i
+
+def evaluate_flow(flow, flow_gt, valid_mask=None):
+    import pdb; pdb.set_trace()
+    if valid_mask is None:
+        tmp = np.multiply(flow_gt[:, 0,:,:], flow_gt[:, 1,:,:])
+        valid_mask = np.ceil(np.clip(np.abs(tmp), 0, 1))
+        
+    N = np.sum(valid_mask)
+
+    u = flow[:, 0, :, :]
+    v = flow[:, 1, :, :]
+
+    u_gt = flow_gt[:, 0, :, :]
+    v_gt = flow_gt[:, 1, :, :]
+
+    ### compute_EPE
+    du = u - u_gt
+    dv = v - v_gt
+
+    du2 = np.multiply(du, du)
+    dv2 = np.multiply(dv, dv)
+
+    EPE = np.multiply(np.sqrt(du2 + dv2), valid_mask)
+    EPE_avg = np.sum(EPE) / N
+    
+    ### compute FL
+    bad_pixels = np.logical_and(
+        EPE > 3,
+        (EPE / np.sqrt(np.sum(np.square(flow_gt), axis=0)) + 1e-5) > 0.05)
+    FL_avg = bad_pixels.sum() / valid_mask.sum()
+
+    return EPE_avg, FL_avg
+
+def val_flow(valloader, net_flow, writer, epoch=1, board_save=True):
+    net_flow.eval()
+    epe, f1_all = 0, 0
+    epe1, fl_all1 = 0,0
+    out_list, epe_list = [], [] 
+    #out1_list, epe1_list = [],[]
+    total_error = 0
+    fl_error = 0
+    results = {}
+    average_over_pixels = False
+    i = 0
+    for left, right, disp_gt, left_forward,flow_gt,valid_gt in valloader:
+        left_img = left.cuda()
+        right_img = right.cuda()
+        i = i + 1
+        mask = (disp_gt < args.maxdisp) & (disp_gt > 0)
+        left_forward = left_forward.cuda()
+        flow_gt = flow_gt.cuda()
+        valid_gt = valid_gt.cuda()
+        
+        results_dict = net_flow(left, left_forward,
+                                 attn_type=args.attn_type,
+                                 attn_splits_list=args.attn_splits_list,
+                                 corr_radius_list=args.corr_radius_list,
+                                 prop_radius_list=args.prop_radius_list,
+                                 num_reg_refine=args.num_reg_refine,
+                                 task='flow',
+                             )
+        
+        # useful when using parallel branches
+        flow_pr = results_dict['flow_preds']
+
+        #flow = padder.unpad(flow_pr[0]).cpu()
+        flow = flow_pr[-1]
+        #epe = torch.sum((flow - flow_gt) ** 2, dim=0).sqrt()
+        #mag = torch.sum(flow_gt ** 2, dim=0).sqrt()
+        #import pdb; pdb.set_trace()
+        # flow1 = flow.squeeze(0)
+        # flow_gt1 = flow_gt.squeeze(0)
+        # epe1 =torch.sum((flow1 - flow_gt1) ** 2,dim=0).sqrt()
+        # mag1 = torch.sum(flow_gt1 ** 2, dim = 0).sqrt()
+        #print(epe1.shape,mag1.shape)
+        epe = ((flow - flow_gt) ** 2).sqrt()
+        mag = (flow_gt ** 2).sqrt()
+        epe = epe.permute(0,2,3,1)
+        mag = mag.permute(0,2,3,1)
+        # epe1 = epe1.view(-1)
+        # mag1 = mag1.view(-1)
+        # val1 = valid_gt.view(-1) >= 0.5
+        
+        out = ((epe > 3.0) & ((epe / mag) > 0.05)).float()
+        val = valid_gt >= 0.5
+        #out1 = ((epe1 > 3.0) & ((epe1 / mag1) > 0.05)).float()
+        
+        # epe1_list.append(epe1[val1].mean().item())
+        # out1_list.append(out1[val1].cpu().numpy())
+        #print(epe.shape,mag.shape,val.shape,out.shape)
+        if average_over_pixels:
+            epe_list.append(epe[val].cpu().numpy())
+        else:
+            epe_list.append(epe[val].mean().item())
+        #import pdb; pdb.set_trace()
+        out_list.append(out[val].cpu().numpy())
+        '''
+        mask = np.ceil(np.clip(np.abs(flow_gt[0,0].cpu().numpy()), 0, 1))
+        epe1, f1 = evaluate_flow(flow.cpu().numpy(),flow_gt.cpu().numpy())
+        total_error += epe1
+        fl_error += f1
+        '''
+        loss_flow, metrics = flow_loss_func_val(flow_pr, flow_gt, valid_gt,
+                                            gamma=args.gamma,
+                                            max_flow=args.max_flow,
+                                            )
+        epe1 = epe1+metrics['epe']
+        fl_all1 = fl_all1 + metrics['fl_all']
+    '''   
+    total_error /= i
+    fl_error /= i
+    '''
+    if average_over_pixels:
+        epe_list = np.concatenate(epe_list)
+    else:
+        epe_list = np.array(epe_list)
+    #import pdb; pdb.set_trace()
+    out_list = np.concatenate(out_list)
+    #out1_list = np.concatenate(out1_list)
+    epe = np.mean(epe_list)
+    
+    # epe1_list = np.array(epe1_list)
+    # epe1 = np.mean(epe1_list)
+    f1_all = np.mean(out_list)
+    # f1_all1 = 100 * np.mean(out1_list)
+
+    #import pdb; pdb.set_trace()
+    epe1 = epe1/i
+    fl_all1 = fl_all1/i
+    if board_save:
+        writer.add_scalar("val/EPE_flow", epe, epoch)
+        writer.add_scalar("val/Fl_all", f1_all, epoch)
+        writer.add_scalar("val/EPE_flow1", epe, epoch)
+        writer.add_scalar("val/Fl_all1", f1_all, epoch)
+
+    print('epe:', epe, 'f1_all',f1_all)
+    print('epe1:', epe1,'fl_all1',fl_all1)
+    
+    
+    return epe, f1_all, epe1, fl_all1
 
 def train(args):
     writer = SummaryWriter(comment=args.writer)
@@ -66,7 +220,17 @@ def train(args):
     # import IPython
     # IPython.embed()
     input_shape = (3, args.img_height, args.img_width)
-    net = dispnetcorr(args.maxdisp)
+    if args.unimatch_stereo:
+        net = UniMatch(feature_channels=args.feature_channels,  #要加参数加成自己的
+                     num_scales=args.num_scales,
+                     upsample_factor=args.upsample_factor,
+                     num_head=args.num_head,
+                     ffn_dim_expansion=args.ffn_dim_expansion,
+                     num_transformer_layers=args.num_transformer_layers,
+                     reg_refine=args.reg_refine,
+                     task='stereo')
+    else:                 
+        net = dispnetcorr(args.maxdisp)
     # add optical flow module
     if args.flow:
         net_flow = UniMatch(feature_channels=args.feature_channels,
@@ -76,12 +240,15 @@ def train(args):
                      ffn_dim_expansion=args.ffn_dim_expansion,
                      num_transformer_layers=args.num_transformer_layers,
                      reg_refine=args.reg_refine,
-                     task=args.task)
+                     task='flow')
 
     G_AB = GeneratorResNet(input_shape, 2)    # 定义用到的generative model
     G_BA = GeneratorResNet(input_shape, 2)
     D_A = Discriminator(3)
     D_B = Discriminator(3)
+    if args.debug:
+        G_AB_debug = GeneratorResNet_debug(input_shape, 2)
+        G_BA_debug = GeneratorResNet_debug(input_shape, 2)
     # if args.flow:
     #     G_A_forward = GeneratorResNet(input_shape,2)   #加前向后向生成
     #     G_A_backward = GeneratorResNet(input_shape,2)
@@ -95,7 +262,7 @@ def train(args):
                 net.apply(weights_init_normal)
 
             if args.load_flownet_path:
-                net_flow = load_multi_gpu_checkpoint(net_flow,args.load_flownet_path,'model')
+                net_flow = load_multi_gpu_checkpoint(net_flow,args.load_flownet_path,'model_flow')
             else:
                 net_flow.apply(weights_init_normal)
             G_AB = load_multi_gpu_checkpoint(G_AB, args.load_gan_path, 'G_AB')
@@ -133,7 +300,9 @@ def train(args):
         G_BA.apply(weights_init_normal)
         D_A.apply(weights_init_normal)
         D_B.apply(weights_init_normal)
-
+        if args.debug:
+            G_AB_debug.apply(weights_init_normal)
+            G_BA_debug.apply(weights_init_normal)
         if args.flow:
             net_flow.apply(weights_init_normal)
             # G_A_forward.apply(weights_init_normal)
@@ -142,17 +311,65 @@ def train(args):
             # D_B_forward.apply(weights_init_normal)
 
     # optimizer = optim.SGD(params, momentum=0.9)
-    optimizer = optim.Adam(net.parameters(), lr=args.lr_rate, betas=(0.9, 0.999))
-    optimizer_G = optim.Adam(itertools.chain(G_AB.parameters(), G_BA.parameters()), lr=args.lr_gan, betas=(0.5, 0.999))
-    optimizer_D_A = optim.Adam(D_A.parameters(), lr=args.lr_gan, betas=(0.5, 0.999))
-    optimizer_D_B = optim.Adam(D_B.parameters(), lr=args.lr_gan, betas=(0.5, 0.999))
-    if args.flow:
-        optimizer_flow = optim.Adam(net_flow.parameters(), lr=args.lr_rate, betas=(0.9, 0.999))
-        # optimizer_G_flow = optim.Adam(itertools.chain(G_A_forward.parameters(), G_A_backward.parameters()), lr=args.lr_gan, betas=(0.5, 0.999))
-        # optimizer_D_forward = optim.Adam(D_A_forward.parameters(), lr=args.lr_gan, betas=(0.5, 0.999))
-        # optimizer_D_backward = optim.Adam(D_A_backward.parameters(), lr=args.lr_gan, betas=(0.5, 0.999))
+    #加载optimizer的
+    
+    if args.unimatch_stereo:
+        optimizer = optim.AdamW(net.parameters(), lr=args.lr_rate,  #调一样不要整混
+                                weight_decay=args.weight_decay)
+    else:
+        optimizer = optim.Adam(net.parameters(), lr=args.lr_rate, betas=(0.9, 0.999))
+        optimizer_G = optim.Adam(itertools.chain(G_AB.parameters(), G_BA.parameters()), lr=args.lr_gan, betas=(0.5, 0.999))
+        optimizer_D_A = optim.Adam(D_A.parameters(), lr=args.lr_gan, betas=(0.5, 0.999))
+        optimizer_D_B = optim.Adam(D_B.parameters(), lr=args.lr_gan, betas=(0.5, 0.999))
+        if args.flow:
+            #optimizer_flow = optim.Adam(net_flow.parameters(), lr=args.lr_flow, betas=(0.9, 0.999))
+            optimizer_flow = optim.AdamW(net_flow.parameters(),lr=args.lr_flow,weight_decay = args.weight_decay)
+            # optimizer_G_flow = optim.Adam(itertools.chain(G_A_forward.parameters(), G_A_backward.parameters()), lr=args.lr_gan, betas=(0.5, 0.999))
+            # optimizer_D_forward = optim.Adam(D_A_forward.parameters(), lr=args.lr_gan, betas=(0.5, 0.999))
+            # optimizer_D_backward = optim.Adam(D_A_backward.parameters(), lr=args.lr_gan, betas=(0.5, 0.999))
+    # start epoch赋初值
+    start_epoch = 0
+    if args.load_checkpoints:
+        print('load optimizer')
+        checkpoint = torch.load(args.load_dispnet_path,map_location = device)
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        start_epoch = checkpoint['epoch']
+        
+        for state in optimizer.state.values():
+            for k, v in state.items():
+                if torch.is_tensor(v):
+                    state[k] = v.cuda()
+        optimizer_G.load_state_dict(checkpoint['optimizer_G_state_dict'])
+        for state in optimizer_G.state.values():
+            for k, v in state.items():
+                if torch.is_tensor(v):
+                    state[k] = v.cuda()
+        optimizer_D_A.load_state_dict(checkpoint['optimizer_DA_state_dict'])
+        for state in optimizer_D_A.state.values():
+            for k, v in state.items():
+                if torch.is_tensor(v):
+                    state[k] = v.cuda()
+        optimizer_D_B.load_state_dict(checkpoint['optimizer_DB_state_dict'])
+        for state in optimizer_D_B.state.values():
+            for k, v in state.items():
+                if torch.is_tensor(v):
+                    state[k] = v.cuda()
+        if args.flow:
+            optimizer_flow.load_state_dict(checkpoint['optimizer_flow_state_dict'])
+            for state in optimizer_flow.state.values():
+                for k, v in state.items():
+                    if torch.is_tensor(v):
+                        state[k] = v.cuda()
 
 
+        # optimizer = load_multi_gpu_optimizer(args.load_dispnet_path,'optimizer_state_dict')
+        # optimizer_G = load_multi_gpu_optimizer(args.load_gan_path,'optimizer_G_state_dict')
+        # optimizer_D_A = load_multi_gpu_optimizer(args.load_gan_path,'optimizer_DA_state_dict')
+        # optimizer_D_B = load_multi_gpu_optimizer(args.load_gan_path,'optimizer_DB_state_dict')
+        # if args.flow:
+        #     optimizer_flow = load_multi_gpu_optimizer(args.load_flownet_path,'optimizer_flow_state_dict')
+        #import pdb; pdb.set_trace()
+    
     if args.use_multi_gpu:
         print("Let's use", torch.cuda.device_count(), "GPUs!")
         net = nn.DataParallel(net, device_ids=list(range(args.use_multi_gpu)))
@@ -160,6 +377,9 @@ def train(args):
         G_BA = nn.DataParallel(G_BA, device_ids=list(range(args.use_multi_gpu)))
         D_A = nn.DataParallel(D_A, device_ids=list(range(args.use_multi_gpu)))
         D_B = nn.DataParallel(D_B, device_ids=list(range(args.use_multi_gpu)))
+        if args.debug:
+            G_AB_debug = nn.DataParallel(G_AB_debug,device_ids=list(range(args.use_multi_gpu)))
+            G_BA_debug = nn.DataParallel(G_BA_debug,device_ids=list(range(args.use_multi_gpu)))
         if args.flow:
             net_flow = nn.DataParallel(net_flow, device_ids=list(range(args.use_multi_gpu)))
             # G_A_forward = nn.DataParallel(G_A_forward,device_ids=list(range(args.use_multi_gpu)))
@@ -172,6 +392,9 @@ def train(args):
     G_BA.to(device)
     D_A.to(device)
     D_B.to(device)
+    if args.debug:
+        G_AB_debug.to(device)
+        G_BA_debug.to(device)
     if args.flow:
         net_flow.to(device)
         # G_A_forward.to(device)
@@ -195,9 +418,9 @@ def train(args):
         raise "No suportive dataset"
     #import pdb; pdb.set_trace()
     #dataset.get_item(1)
-    trainloader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
+    trainloader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=16)
     valdataset = ValJointImageDataset()
-    valloader = torch.utils.data.DataLoader(valdataset, batch_size=args.test_batch_size, shuffle=False, num_workers=1)
+    valloader = torch.utils.data.DataLoader(valdataset, batch_size=args.test_batch_size, shuffle=False, num_workers=16)
 
     train_loss_meter = AverageMeter()
     val_loss_meter = AverageMeter()
@@ -209,9 +432,11 @@ def train(args):
     #    print('Val epoch[{}/{}] loss: {}'.format(0, args.total_epochs, l1_test_loss))
 
     print('begin training...')
+    print('start_epoch:', start_epoch)
+    print('total_epoch:', args.total_epochs)
     best_val_d1 = 1.
     best_val_epe = 100.
-    for epoch in range(args.total_epochs):
+    for epoch in range(start_epoch,args.total_epochs):
         #net.train()
         #G_AB.train()
 
@@ -220,15 +445,23 @@ def train(args):
         t = time.time()
         # custom lr decay, or warm-up
         lr = args.lr_rate
-        if epoch >= int(args.lrepochs.split(':')[0]):
-            lr = lr / int(args.lrepochs.split(':')[1])
-        for param_group in optimizer.param_groups:
-            param_group['lr'] = lr
+        #TODO:改lr策略，用别的策略
+        if args.unimatch_stereo:
+            pass
+        else:
+            if epoch >= int(args.lrepochs.split(':')[0]):
+                lr = lr / int(args.lrepochs.split(':')[1])
+        #import pdb; pdb.set_trace()
+        # for param_group in optimizer.param_groups:
+        #     param_group['lr'] = lr
         # add flow
         if args.flow:
-            for param_group in optimizer_flow.param_groups:
-                param_group['lr'] = lr
-
+            lr_flow = args.lr_flow
+            if epoch >= int(args.lrepochs.split(':')[0]):
+                lr_flow = lr_flow / int(args.lrepochs.split(':')[1])
+            # for param_group in optimizer_flow.param_groups:
+            #     param_group['lr'] = lr
+        #import pdb; pdb.set_trace()
         for i, batch in enumerate(trainloader):
             n_iter += 1
             leftA = batch['leftA'].to(device)
@@ -265,6 +498,8 @@ def train(args):
                 if args.lambda_warp_inv:
                     fake_leftB, fake_leftB_feats = G_AB(leftA, extract_feat=True)
                     fake_leftA, fake_leftA_feats = G_BA(leftB, extract_feat=True)
+                    # add forward
+                    fake_leftA_forward, fake_leftA_forward_feats = G_BA(leftB_forward, extract_feat=True)
                 else:
                     fake_leftB = G_AB(leftA)
                     fake_leftA = G_BA(leftB)
@@ -326,6 +561,8 @@ def train(args):
                     rec_leftA_warp, loss_warp_inv_feat2 = G_BA(fake_rightB, -dispA, True, [x.detach() for x in rec_leftA_feats])
                     loss_warp_inv1 = warp_loss([(G_BA(fake_leftB_warp[0]), fake_leftB_warp[1])], [leftA], weights=[1])
                     loss_warp_inv2 = warp_loss([rec_leftA_warp], [leftA], weights=[1])
+                    #print(len(rec_leftA_warp),len(leftA))
+                    #print(rec_leftA_warp[0].shape,rec_leftA_warp[1].shape,leftA.shape)
                     loss_warp_inv = loss_warp_inv1 + loss_warp_inv2 + loss_warp_inv_feat1.mean() + loss_warp_inv_feat2.mean()
                 else:
                     loss_warp_inv = 0
@@ -341,16 +578,52 @@ def train(args):
 
                 # corr loss
                 if args.lambda_corr:
-                    
-                    corrB = net(leftB, rightB, extract_feat=True)
-                    #print(corrB[0].shape,corrB[1].shape)
-                    
-                    corrB1 = net(leftB, rec_rightB, extract_feat=True)
-                    corrB2 = net(rec_leftB, rightB, extract_feat=True)
-                    corrB3 = net(rec_leftB, rec_rightB, extract_feat=True)
-                    
-                    #import pdb; pdb.set_trace()
-                    loss_corr = (criterion_identity(corrB1, corrB)+criterion_identity(corrB2, corrB)+criterion_identity(corrB3, corrB))/3
+                    if args.unimatch_stereo:
+                        corrB = net(leftB, rightB,
+                               attn_type=args.attn_type,
+                               attn_splits_list=args.attn_splits_list,
+                               corr_radius_list=args.corr_radius_list,
+                               prop_radius_list=args.prop_radius_list,
+                               num_reg_refine=args.num_reg_refine,
+                               task='stereo',
+                               )['flow_preds']
+                        corrB1 = net(leftB, rec_rightB,
+                               attn_type=args.attn_type,
+                               attn_splits_list=args.attn_splits_list,
+                               corr_radius_list=args.corr_radius_list,
+                               prop_radius_list=args.prop_radius_list,
+                               num_reg_refine=args.num_reg_refine,
+                               task='stereo',
+                               )['flow_preds']
+                        corrB2 = net(rec_leftB, rightB,
+                               attn_type=args.attn_type,
+                               attn_splits_list=args.attn_splits_list,
+                               corr_radius_list=args.corr_radius_list,
+                               prop_radius_list=args.prop_radius_list,
+                               num_reg_refine=args.num_reg_refine,
+                               task='stereo',
+                               )['flow_preds']
+                        corrB3 = net(rec_leftB, rec_rightB,
+                               attn_type=args.attn_type,
+                               attn_splits_list=args.attn_splits_list,
+                               corr_radius_list=args.corr_radius_list,
+                               prop_radius_list=args.prop_radius_list,
+                               num_reg_refine=args.num_reg_refine,
+                               task='stereo',
+                               )['flow_preds']
+                        #print(corrB[0].shape,corrB1[0].shape,corrB2[0].shape,corrB3[0].shape)
+                        # import pdb; pdb.set_trace() 这里是带个[0]?
+                        loss_corr = (criterion_identity(corrB1[0], corrB[0])+criterion_identity(corrB2[0], corrB[0])+criterion_identity(corrB3[0], corrB[0]))/3
+                    else:
+                        corrB = net(leftB, rightB, extract_feat=True)
+                        #print(corrB[0].shape,corrB[1].shape)
+                        
+                        corrB1 = net(leftB, rec_rightB, extract_feat=True)
+                        corrB2 = net(rec_leftB, rightB, extract_feat=True)
+                        corrB3 = net(rec_leftB, rec_rightB, extract_feat=True)
+                        
+                        #import pdb; pdb.set_trace()
+                        loss_corr = (criterion_identity(corrB1, corrB)+criterion_identity(corrB2, corrB)+criterion_identity(corrB3, corrB))/3
                 else:
                     loss_corr = 0.
 
@@ -389,6 +662,9 @@ def train(args):
             net.train()
             G_AB.eval()
             G_BA.eval()
+            if args.debug:
+                G_AB_debug.eval()
+                G_BA_debug.eval()
             optimizer.zero_grad()
             if args.flow:
                 net_flow.train()
@@ -453,25 +729,100 @@ def train(args):
             else:
                 left_right_loss=0
 
+            if args.unimatch_stereo:
+                pred_disps = net(G_AB(leftA), G_AB.forward(rightA),
+                               attn_type=args.attn_type,
+                               attn_splits_list=args.attn_splits_list,
+                               corr_radius_list=args.corr_radius_list,
+                               prop_radius_list=args.prop_radius_list,
+                               num_reg_refine=args.num_reg_refine,
+                               task='stereo',
+                               )['flow_preds']
+                maskA = (dispA < args.maxdisp) & (dispA > 0)
+                disp_loss = 0
+                # loss weights
+                loss_weights = [0.9 ** (len(pred_disps) - 1 - power) for power in
+                                range(len(pred_disps))]
+                loss_disp_warp_inv =0
+                loss_disp_warp = 0
+                #print(len(pred_disps))
+                #print(pred_disps[0].shape, pred_disps[1].shape,pred_disps[2].shape,pred_disps[-1].shape)
+                for k in range(len(pred_disps)):
+                    pred_disp = pred_disps[k].unsqueeze(1)
+                    weight = loss_weights[k]
+                    #print(maskA.shape,pred_disp.shape,dispA.shape)
+                    curr_lossA = F.smooth_l1_loss(pred_disp[maskA], dispA[maskA],
+                                                reduction='mean')
+                    disp_loss += weight * curr_lossA
 
-            disp_ests = net(G_AB(leftA), G_AB.forward(rightA))
-            # 加自己的predA_disp跟predB_disp之间的loss
-            # if args.result_adv:
-            #     disp_estsB = net(leftB,rightB)
-            
-            #print(disp_ests)
-            #print(disp_ests.shape)
-            mask = (dispA < args.maxdisp) & (dispA > 0)
-            #print(disp_ests.shape, dispA.shape)
-            #import pdb; pdb.set_trace()
-            loss0 = model_loss0(disp_ests, dispA, mask)
-            
+                    if args.lambda_disp_warp_inv:
+                        disp_warp = -pred_disp
+                        #disp_warp = [-pred_disp[i] for i in range(3)]
+                        #print(fake_leftA_feats[0][0].shape)
+                        curr_loss_disp_warp_inv = G_BA(rightB, disp_warp, True, [x.detach() for x in fake_leftA_feats])[-1]
+                        #print(rightB.shape,disp_warp.shape)
+                        #curr_loss_disp_warp_inv = warp_loss([rightB], [disp_warp], weights=[1])
+                        # print(len(G_BA(rightB, disp_warp, True, [x.detach() for x in fake_leftA_feats])))
+                        # print(G_BA(rightB, disp_warp, True, [x.detach() for x in fake_leftA_feats])[0].shape)
+                        # print(G_BA(rightB, disp_warp, True, [x.detach() for x in fake_leftA_feats])[1])
+                        #import pdb; pdb.set_trace()
+                        #loss_disp_warp_inv = loss_disp_warp_inv.mean()
+                        #print(curr_loss_disp_warp_inv)
+                        #loss_disp_warp_inv += curr_loss_disp_warp_inv
+                        loss_disp_warp_inv = curr_loss_disp_warp_inv.mean()
+                        #print('loss_disp_warp_inv',loss_disp_warp_inv)
+                    else:
+                        loss_disp_warp_inv = 0
+                    
+                    if args.lambda_disp_warp:
+                        disp_warp = pred_disp
+                        curr_loss_disp_warp = G_BA(leftB, disp_warp, True, [x.detach() for x in fake_rightA_feats])[-1]
+                        #loss_disp_warp = loss_disp_warp.mean()
+                        loss_disp_warp = curr_loss_disp_warp.mean()
+                    else:
+                        loss_disp_warp = 0
+
+                loss0 = disp_loss
+
+            else:
+                disp_ests = net(G_AB(leftA), G_AB.forward(rightA))  #各种feature, len=7
+        
+                # 加自己的predA_disp跟predB_disp之间的loss
+                # if args.result_adv:
+                #     disp_estsB = net(leftB,rightB)
+                
+                #print(len(disp_ests))
+                #print(disp_ests[0].shape,disp_ests[1].shape,disp_ests[2].shape,disp_ests[3].shape)
+                #print('disp_ests[0]:',disp_ests[0].squeeze(1).shape)
+                mask = (dispA < args.maxdisp) & (dispA > 0)
+                #print(disp_ests.shape, dispA.shape)
+                #import pdb; pdb.set_trace()
+                loss0 = model_loss0(disp_ests, dispA, mask)
+
+                if args.lambda_disp_warp_inv:
+                    
+                    disp_warp = [-disp_ests[i] for i in range(3)] 
+                    #print(fake_leftA_feats[0][0].shape)
+                    loss_disp_warp_inv = G_BA(rightB, disp_warp, True, [x.detach() for x in fake_leftA_feats])
+                    #print(loss_disp_warp_inv)
+                    #import pdb; pdb.set_trace()
+                    loss_disp_warp_inv = loss_disp_warp_inv.mean()
+                else:
+                    loss_disp_warp_inv = 0
+
+                if args.lambda_disp_warp:
+                    disp_warp = [disp_ests[i] for i in range(3)] # len:4 shape:[1,1,256,512],[1,1,128,256],[1,1,64,128],[1,1,32,64]
+                    loss_disp_warp = G_BA(leftB, disp_warp, True, [x.detach() for x in fake_rightA_feats])
+                    loss_disp_warp = loss_disp_warp.mean()
+                else:
+                    loss_disp_warp = 0
+                
             # add optical flow: flow的image输入输出是否和stereo matching 任务一样？
 
             #left_A_forward用下一帧的右图生成
             #left_A_forward = G()
             if args.flow:
-                print(G_AB(leftA).shape, G_AB.forward(leftA_forward).shape)
+                #print(G_AB(leftA).shape, G_AB.forward(leftA_forward).shape)
                 results_dict = net_flow(G_AB(leftA), G_AB.forward(leftA_forward),
                                  attn_type=args.attn_type,
                                  attn_splits_list=args.attn_splits_list,
@@ -496,7 +847,8 @@ def train(args):
                                             gamma=args.gamma,
                                             max_flow=args.max_flow,
                                             )
-
+            else:
+                loss_flow, metrics= 0, 0
             if args.smooth_loss:
                 #print(disp_ests[0].shape,leftA.shape, mask.shape)
                 #for i in range(3):
@@ -505,29 +857,81 @@ def train(args):
                 loss_smooth_main = smooth_loss(disp_ests[0],leftA)
             else:
                 loss_smooth_main = 0
+            
+            loss_flow_warp = 0
+            loss_flow_warp_inv =0
+            # TODO add flow multiscale warp
+            if args.flow:
+                #import pdb; pdb.set_trace() 
+                if args.lambda_flow_warp_inv:
+                    #flow_preds: len = 4, flow_preds[0].shape = [1,2,256,512], flow_preds[1].shape = [1,2,256,512]
+            
+                    num_downsample = 3
+                    flow_predsx = flow_preds[-1][:,0,:,:].unsqueeze(1)
+                    flow_predsy = flow_preds[-1][:,1,:,:].unsqueeze(1)
+                    flow_inv_warpx = downsample_optical_flow(flow_predsx, downsample_factor=1/2, num_downsample=num_downsample)
+                    flow_inv_warpy = downsample_optical_flow(flow_predsy, downsample_factor=1/2, num_downsample=num_downsample)
+                    #作反向warp
+                    flow_inv_warpx = [-flow_inv_warpx[i] for i in range(3)]
+                    flow_inv_warpy = [-flow_inv_warpy[i] for i in range(3)]
+                    # leftB_forward+inv_flow之后，得到warp之后的warped_leftB, 和fake_leftA的feature做loss
+                    if args.debug:
+                        loss_flow_warpx_inv = G_BA_debug(leftB_forward, flow_inv_warpx, True, [x.detach() for x in fake_leftA_feats])
+                        loss_flow_warpy_inv = G_BA_debug(leftB_forward, flow_inv_warpy, True, [x.detach() for x in fake_leftA_feats])
+                    else:
+                        loss_flow_warpx_inv = G_BA(leftB_forward, flow_inv_warpx, True, [x.detach() for x in fake_leftA_feats])
+                        loss_flow_warpy_inv = G_BA(leftB_forward, flow_inv_warpy, True, [x.detach() for x in fake_leftA_feats])
+                        #loss_flow_warpx = G_BA(leftB, flow_warpx, True, [x.detach() for x in fake_rightA_feats])
+                        #loss_flow_warpy = G_BA(leftB, flow_warpy, True, [x.detach() for x in fake_rightA_feats])
+                    loss_flow_warp = loss_flow_warpx_inv+loss_flow_warpy_inv
+                    loss_flow_warp = loss_flow_warp.mean()
 
-            if args.lambda_disp_warp_inv:
-                #import pdb; pdb.set_trace()
-                disp_warp = [-disp_ests[i] for i in range(3)]
-                # print('disp_warp[0]:',disp_warp[0].shape)
-                # print('disp_warp[1]:',disp_warp[1].shape)
-                # print('disp_warp[2]:',disp_warp[2].shape)
-                # print('disp_warp[-4]:',disp_warp[-4].shape)
-                loss_disp_warp_inv = G_BA(rightB, disp_warp, True, [x.detach() for x in fake_leftA_feats])
-                loss_disp_warp_inv = loss_disp_warp_inv.mean()
-            else:
-                loss_disp_warp_inv = 0
+                else:
+                    loss_flow_warp_inv = 0
 
-            if args.lambda_disp_warp:
-                disp_warp = [disp_ests[i] for i in range(3)]
-                loss_disp_warp = G_BA(leftB, disp_warp, True, [x.detach() for x in fake_rightA_feats])
-                loss_disp_warp = loss_disp_warp.mean()
+                if args.lambda_flow_warp:
+                     # TODO 提取multi-level features from flow
+                    '''
+                    print(len(flow_preds))
+                    print(flow_preds[-1].shape)
+                    '''
+                    #new_sizes = [(128, 256), (64, 128), (32, 64)]
+                    #import pdb; pdb.set_trace()
+                    num_downsample = 3
+                    #flow_warp = downsample_optical_flow(flow_preds[-1], downsample_factor=1/2, num_downsample=num_downsample)
+                    flow_predsx = flow_preds[-1][:,0,:,:].unsqueeze(1)
+                    flow_predsy = flow_preds[-1][:,1,:,:].unsqueeze(1)
+                    flow_warpx = downsample_optical_flow(flow_predsx, downsample_factor=1/2, num_downsample=num_downsample)
+                    flow_warpy = downsample_optical_flow(flow_predsy, downsample_factor=1/2, num_downsample=num_downsample)
+                    #disp_warp = [disp_ests[i] for i in range(3)]
+                    #loss_disp_warp = G_BA_debug(leftB, disp_warp, True, [x.detach() for x in fake_rightA_feats])
+                    #import pdb; pdb.set_trace()
+                    #flow_warp = [flow_preds[i] for i in range(3)]
+                    #loss_flow_warp = warp_loss(flow_preds[-1],flowB,weigths=[1.0])
+                    #import pdb; pdb.set_trace()
+                    #这里应当是leftB_forward? 不对，warp得到的应该是预测的flow. leftB 到fake_leftA_forward_feats
+                    # leftB_forward 到fake_leftA_feats
+
+                    if args.debug:
+                        loss_flow_warpx = G_BA_debug(leftB, flow_warpx, True, [x.detach() for x in fake_leftA_forward_feats])
+                        loss_flow_warpy = G_BA_debug(leftB, flow_warpy, True, [x.detach() for x in fake_leftA_forward_feats])
+                    else:
+                        loss_flow_warpx = G_BA(leftB, flow_warpx, True, [x.detach() for x in fake_leftA_forward_feats])
+                        loss_flow_warpy = G_BA(leftB, flow_warpy, True, [x.detach() for x in fake_leftA_forward_feats])
+                        
+                    loss_flow_warp = loss_flow_warpx+loss_flow_warpy
+                    loss_flow_warp = loss_flow_warp.mean()
+                else:
+                    loss_flow_warp = 0
             else:
-                loss_disp_warp = 0
+                loss_flow_warp = 0
+                loss_flow_warp_inv = 0
+            # 改变思路？
+                
 
             loss = loss0 + args.lambda_disp_warp*loss_disp_warp + args.lambda_disp_warp_inv*loss_disp_warp_inv + args.left_right_consistency * left_right_loss \
-                     + args.smooth_loss * loss_smooth_main + args.flow * loss_flow
-                   
+                     + args.smooth_loss * loss_smooth_main + args.flow * loss_flow + args.lambda_flow_warp* loss_flow_warp + args.lambda_flow_warp_inv * loss_flow_warp_inv
+            #print(loss)
             loss.backward()
             optimizer.step()
             if args.flow:
@@ -542,6 +946,8 @@ def train(args):
                     writer.add_scalar('loss/loss_flow', loss_flow, train_loss_meter.count * print_freq)
                 writer.add_scalar('loss/loss_disp_warp', loss_disp_warp, train_loss_meter.count * print_freq)
                 writer.add_scalar('loss/loss_disp_warp_inv', loss_disp_warp_inv, train_loss_meter.count * print_freq)
+                writer.add_scalar('loss/loss_flow_warp_inv', loss_flow_warp_inv, train_loss_meter.count * print_freq)
+                writer.add_scalar('loss/loss_flow_warp', loss_flow_warp, train_loss_meter.count * print_freq)
                 writer.add_scalar('loss/loss_left_right',left_right_loss,train_loss_meter.count * print_freq)
                 writer.add_scalar('loss/loss_smooth_main', loss_smooth_main, train_loss_meter.count * print_freq)
 
@@ -593,21 +999,29 @@ def train(args):
                     fakeB_warp_visual = vutils.make_grid(fake_leftB_warp[0][:4,:,:,:], nrow=1, normalize=True, scale_each=True)
                     writer.add_image('warp/recA_L_warp', recA_warp_visual, i)
                     writer.add_image('warp/fakeB_L_warp', fakeB_warp_visual, i)
-                if args.lambda_warp:
-                    writer.add_image('warp/recA_R_warp', recA_warp_R_visual, i)
-                    writer.add_image('warp/fakeB_R_warp', fakeB_warp_R_visual, i)
+                if args.lambda_warp:                   
                     recA_warp_R_visual = vutils.make_grid(rec_rightA_warp[0][:4,:,:,:], nrow=1, normalize=True, scale_each=True)
                     fakeB_warp_R_visual = vutils.make_grid(fake_rightB_warp[0][:4,:,:,:], nrow=1, normalize=True, scale_each=True)
+                    writer.add_image('warp/recA_R_warp', recA_warp_R_visual, i)
+                    writer.add_image('warp/fakeB_R_warp', fakeB_warp_R_visual, i)
         # TODO: 加 optical flow的evaluation metrics,看能不能相互促进
         with torch.no_grad():
             EPE, D1,Thres1s,Thres2s,Thres3s = val(valloader, net, writer, epoch=epoch, board_save=True)
+            if args.flow:
+                epe_flow, f1_all, epe1_flow, fl_all1 = val_flow(valloader, net_flow, writer, epoch=epoch, board_save=True)
 
         t1 = time.time()   #to do: add other evaluation metrics
         print('epoch:{}, D1:{:.4f}, EPE:{:.4f},Thres2s:{:.4f},Thres4s:{:.4f},Thres5s:{:.4f}, cost time:{} '.format(epoch, D1, EPE,Thres1s,Thres2s,Thres3s, t1-t))
-
+        # add flow
+        if args.flow:
+            print('epoch:{}, epe_flow:{:.4f}, f1_all:{:.4f},epe1_flow:{:.4f}, fl_all1:{:.4f}, cost time:{} '.format(epoch, epe_flow,f1_all, epe1_flow, fl_all1, t1-t))
         if (epoch % args.save_interval == 0) or D1 < best_val_d1 or EPE < best_val_epe:
             best_val_d1 = D1
             best_val_epe = EPE
+            # add flow
+            if args.flow:
+                best_val_epe_flow = epe_flow
+                best_f1_all = f1_all
             if args.flow:
                 torch.save({
                             'epoch': epoch,
@@ -622,7 +1036,9 @@ def train(args):
                             'optimizer_G_state_dict': optimizer_G.state_dict(),
                             'optimizer_state_dict': optimizer.state_dict(),
                             'optimizer_flow_state_dict':optimizer_flow.state_dict(),
-                            }, args.checkpoint_save_path + '/ep' + str(epoch) + '_D1_{:.4f}_EPE{:.4f}_Thres2s{:.4f}_Thres4s{:.4f}_Thres5s{:.4f}'.format(D1, EPE,Thres1s,Thres2s,Thres3s) + '.pth.rar')
+                            }, args.checkpoint_save_path + '/ep' + str(epoch) + '_D1_{:.4f}_EPE{:.4f}_Thres2s{:.4f}_Thres4s{:.4f}_Thres5s{:.4f}_epe_flow{:.4f}_f1_all{:.4f}_epe1_flow{:.4f}_fl_all1{:.4f}'.format(D1, EPE,Thres1s,Thres2s,Thres3s,epe_flow,f1_all, epe1_flow, fl_all1) + '.pth')
+            
+            
             else:
                 torch.save({
                         'epoch': epoch,
@@ -635,7 +1051,7 @@ def train(args):
                         'optimizer_DB_state_dict': optimizer_D_B.state_dict(),
                         'optimizer_G_state_dict': optimizer_G.state_dict(),
                         'optimizer_state_dict': optimizer.state_dict(),
-                        }, args.checkpoint_save_path + '/ep' + str(epoch) + '_D1_{:.4f}_EPE{:.4f}_Thres2s{:.4f}_Thres4s{:.4f}_Thres5s{:.4f}'.format(D1, EPE,Thres1s,Thres2s,Thres3s) + '.pth.rar')
+                        }, args.checkpoint_save_path + '/ep' + str(epoch) + '_D1_{:.4f}_EPE{:.4f}_Thres2s{:.4f}_Thres4s{:.4f}_Thres5s{:.4f}'.format(D1, EPE,Thres1s,Thres2s,Thres3s) + '.pth')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Hyperparams')
@@ -666,6 +1082,9 @@ if __name__ == '__main__':
     parser.add_argument('--lambda_disp_warp', type=float, default=0)
     parser.add_argument('--lambda_disp_warp_inv', type=float, default=1)
     parser.add_argument('--lambda_corr', type=float, default=10)
+
+    parser.add_argument('--lambda_flow_warp', type=float,default = 0)
+    parser.add_argument('--lambda_flow_warp_inv', type=float, default = 1)
 
     # load & save checkpoints
     parser.add_argument('--load_checkpoints', nargs='?', type=int, default=0, help='load from ckp(saved by Pytorch)')
@@ -714,5 +1133,13 @@ if __name__ == '__main__':
                         help='exponential weighting')
     parser.add_argument('--max_flow', default=400, type=int,
                         help='exclude very large motions during training')
+    parser.add_argument('--lr_flow', nargs='?', type=float, default=1e-4, help='learning rate for unimatch flow')
+    parser.add_argument('--weight_decay', default=1e-4, type=float)
+
+    # use unimatch stereo part
+    parser.add_argument('--unimatch_stereo',type = float,help= 'use unimatch stereo as dispnet', default = 1)
+    # parser.add_argument('--max_disp', default=400, type=int,
+    #                     help='exclude very large disparity in the loss function')
+    parser.add_argument('--debug', type=float, default=1)
     args = parser.parse_args()
     train(args)
