@@ -333,7 +333,7 @@ def train(args):
         print('load optimizer')
         checkpoint = torch.load(args.load_dispnet_path,map_location = device)
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        start_epoch = checkpoint['epoch']
+        start_epoch = checkpoint['epoch']+1
         
         for state in optimizer.state.values():
             for k, v in state.items():
