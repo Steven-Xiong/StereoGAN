@@ -65,12 +65,12 @@ class dispnetcorr(nn.Module):
         maxD = max(self.D, imL.shape[-1]) # 设置最大视差
         out = []
         out_scale = []
-
+        #import pdb;pdb.set_trace()
         #　编码阶段
-        conv1L = self.conv1(imL)
-        conv1R = self.conv1(imR)
-        conv2L = self.conv2(conv1L)
-        conv2R = self.conv2(conv1R)
+        conv1L = self.conv1(imL)  
+        conv1R = self.conv1(imR)  
+        conv2L = self.conv2(conv1L) #[1,128,64,128]
+        conv2R = self.conv2(conv1R) #[1,128,64,128]
         corr = self.corr(conv2L, conv2R)
         if extract_feat:
             return corr

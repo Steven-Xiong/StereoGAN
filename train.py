@@ -7,7 +7,7 @@ import sys
 import itertools
 import numpy as np
 from scipy import misc
-
+import numpy
 import torch
 import torch.nn as nn 
 import torch.optim as  optim
@@ -16,7 +16,7 @@ from models.loss import warp_loss, model_loss0, PerceptualLoss, smooth_loss,flow
 from models.dispnet import dispnetcorr
 from models.gan_nets import GeneratorResNet,GeneratorResNet_debug, Discriminator, weights_init_normal
 from unimatch.unimatch import UniMatch
-from dataset import ImageDataset, ValJointImageDataset
+from dataset import ImageDataset, ValJointImageDataset, ImageDataset2
 
 from tensorboardX import SummaryWriter
 import torchvision.utils as vutils
@@ -318,15 +318,15 @@ def train(args):
                                 weight_decay=args.weight_decay)
     else:
         optimizer = optim.Adam(net.parameters(), lr=args.lr_rate, betas=(0.9, 0.999))
-        optimizer_G = optim.Adam(itertools.chain(G_AB.parameters(), G_BA.parameters()), lr=args.lr_gan, betas=(0.5, 0.999))
-        optimizer_D_A = optim.Adam(D_A.parameters(), lr=args.lr_gan, betas=(0.5, 0.999))
-        optimizer_D_B = optim.Adam(D_B.parameters(), lr=args.lr_gan, betas=(0.5, 0.999))
-        if args.flow:
-            #optimizer_flow = optim.Adam(net_flow.parameters(), lr=args.lr_flow, betas=(0.9, 0.999))
-            optimizer_flow = optim.AdamW(net_flow.parameters(),lr=args.lr_flow,weight_decay = args.weight_decay)
-            # optimizer_G_flow = optim.Adam(itertools.chain(G_A_forward.parameters(), G_A_backward.parameters()), lr=args.lr_gan, betas=(0.5, 0.999))
-            # optimizer_D_forward = optim.Adam(D_A_forward.parameters(), lr=args.lr_gan, betas=(0.5, 0.999))
-            # optimizer_D_backward = optim.Adam(D_A_backward.parameters(), lr=args.lr_gan, betas=(0.5, 0.999))
+    optimizer_G = optim.Adam(itertools.chain(G_AB.parameters(), G_BA.parameters()), lr=args.lr_gan, betas=(0.5, 0.999))
+    optimizer_D_A = optim.Adam(D_A.parameters(), lr=args.lr_gan, betas=(0.5, 0.999))
+    optimizer_D_B = optim.Adam(D_B.parameters(), lr=args.lr_gan, betas=(0.5, 0.999))
+    if args.flow:
+        #optimizer_flow = optim.Adam(net_flow.parameters(), lr=args.lr_flow, betas=(0.9, 0.999))
+        optimizer_flow = optim.AdamW(net_flow.parameters(),lr=args.lr_flow,weight_decay = args.weight_decay)
+        # optimizer_G_flow = optim.Adam(itertools.chain(G_A_forward.parameters(), G_A_backward.parameters()), lr=args.lr_gan, betas=(0.5, 0.999))
+        # optimizer_D_forward = optim.Adam(D_A_forward.parameters(), lr=args.lr_gan, betas=(0.5, 0.999))
+        # optimizer_D_backward = optim.Adam(D_A_backward.parameters(), lr=args.lr_gan, betas=(0.5, 0.999))
     # start epoch赋初值
     start_epoch = 0
     if args.load_checkpoints:
@@ -412,7 +412,7 @@ def train(args):
     # data loader
     if args.source_dataset == 'driving':
         dataset = ImageDataset(height=args.img_height, width=args.img_width,left_right_consistency = args.left_right_consistency)
-    elif args.source_dataset == 'synthia':
+    elif args.source_dataset == 'VKITTI2':
         dataset = ImageDataset2(height=args.img_height, width=args.img_width,left_right_consistency = args.left_right_consistency)
     else:
         raise "No suportive dataset"
@@ -615,7 +615,8 @@ def train(args):
                         # import pdb; pdb.set_trace() 这里是带个[0]?
                         loss_corr = (criterion_identity(corrB1[0], corrB[0])+criterion_identity(corrB2[0], corrB[0])+criterion_identity(corrB3[0], corrB[0]))/3
                     else:
-                        corrB = net(leftB, rightB, extract_feat=True)
+                        #import pdb; pdb.set_trace()
+                        corrB = net(leftB, rightB, extract_feat=True) #shape[n_gpu,41,64,128]
                         #print(corrB[0].shape,corrB[1].shape)
                         
                         corrB1 = net(leftB, rec_rightB, extract_feat=True)

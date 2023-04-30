@@ -12,7 +12,6 @@ def weights_init_normal(m):
         torch.nn.init.normal_(m.weight.data, 1.0, 0.02)
         torch.nn.init.constant_(m.bias.data, 0.0)
 
-
 ##############################
 #           U-NET
 ##############################
@@ -315,10 +314,14 @@ class GeneratorResNet_debug(nn.Module):
         if offset is not None:
             if extract_feat:
                 if len(offset) == 3: #对应flow_warp
-                    y = bilinear_sampler(x, offset[-1], 'zeros')
-                    y1 = bilinear_sampler(x1, offset[-2], 'zeros')
-                    y2 = bilinear_sampler(x2, offset[-3], 'zeros')
-                    loss_warp = warp_loss([y, y1, y2], feat_gt, weights=[0.5,0.5,0.7])
+                    y = bilinear_sampler(x, offset[-1], 'zeros')    # x.shape: [2,256,64,128] offset[-1].shape:[2,1,64,128]
+                    y1 = bilinear_sampler(x1, offset[-2], 'zeros')  # x1.shape:[2,128,128,256] offset[-2].shape:[2,1,128,256]
+                    y2 = bilinear_sampler(x2, offset[-3], 'zeros')  # x2.shape[2,64,256,512] offset[-3].shape:[2,1,256,512]
+                    loss_warp = warp_loss([y, y1, y2], feat_gt, weights=[0.5,0.5,0.7]) 
+                    return loss_warp
+                elif len(offset) == 1: #不提取多维度特征
+                    y = bilinear_sampler(x2, offset[-1], 'zeros')
+                    loss_warp = warp_loss([y],feat_gt, weights =[1.0])
                     return loss_warp
                 else:
                     y = bilinear_sampler(x, F.max_pool2d(offset,4,4)/4, 'zeros')

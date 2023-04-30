@@ -100,6 +100,27 @@ def readflow_driving(file):
     else:
         return flow[:, :, :-1]
     return flow
+
+# add VKITTI2
+def read_vkitti2_flow(filename):
+    # In R, flow along x-axis normalized by image width and quantized to [0;2^16 – 1]
+    # In G, flow along x-axis normalized by image width and quantized to [0;2^16 – 1]
+    # B = 0 for invalid flow (e.g., sky pixels)
+    bgr = cv2.imread(filename, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH)
+    h, w, _c = bgr.shape
+    assert bgr.dtype == np.uint16 and _c == 3
+    # b == invalid flow flag == 0 for sky or other invalid flow
+    invalid = bgr[:, :, 0] == 0
+    # g,r == flow_y,x normalized by height,width and scaled to [0;2**16 – 1]
+    out_flow = 2.0 / (2 ** 16 - 1.0) * bgr[:, :, 2:0:-1].astype('f4') - 1  # [H, W, 2]
+    out_flow[..., 0] *= (w - 1)
+    out_flow[..., 1] *= (h - 1)
+
+    out_flow[invalid] = 0.000001  # invalid as very small value to add supervison on the sky
+    valid = (np.logical_or(invalid, ~invalid)).astype(np.float32)
+
+    return out_flow, valid
+    
 # add from unimatch
 def readFlowKITTI(filename):
     flow = cv2.imread(filename, cv2.IMREAD_ANYDEPTH | cv2.IMREAD_COLOR)
