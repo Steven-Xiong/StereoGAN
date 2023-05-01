@@ -174,7 +174,7 @@ def flow_loss_func(flow_preds, flow_gt, valid,
                    ):
     n_predictions = len(flow_preds)
     flow_loss = 0.0
-
+    #import pdb; pdb.set_trace()
     # exlude invalid pixels and extremely large diplacements
     mag = torch.sum(flow_gt ** 2, dim=1).sqrt()  # [B, H, W]
     # print('mag.shape:',mag.shape)

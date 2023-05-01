@@ -33,8 +33,8 @@ class ImageDataset(Dataset):
         self.rootB_error_map = '/home/autel/xzx/CREStereo/vis_results/CREStereo/data/error_map_pfm'
         # self.leftA_files, self.rightA_files, self.dispA_files = self.load_path('filenames/driving_adv.txt')
         # self.leftB_files, self.rightB_files, self.dispB_files = self.load_path('filenames/kitti15_adv.txt')
-        self.leftA_files, self.rightA_files, self.dispA_files,self.leftA_forward,self.flowA = self.load_flow_path('filenames/driving_adv_flow_debug.txt')
-        self.leftB_files, self.rightB_files, self.dispB_files, self.leftB_forward,self.flowB = self.load_flow_path('filenames/kitti15_adv_flow_train_debug.txt')
+        self.leftA_files, self.rightA_files, self.dispA_files,self.leftA_forward,self.flowA = self.load_flow_path('filenames/driving_adv_flow.txt')
+        self.leftB_files, self.rightB_files, self.dispB_files, self.leftB_forward,self.flowB = self.load_flow_path('filenames/kitti15_adv_flow_train.txt')
 
     def load_path(self, list_filename):
         lines = read_all_lines(list_filename)
@@ -163,7 +163,7 @@ class ImageDataset(Dataset):
 # for validation
 class ValJointImageDataset(Dataset):
     def __init__(self, root='data/kitti_15', transforms_=None, input_shape=(3, 384, 1280)):
-        f = open('./filenames/kitti15_adv_flow_val_debug.txt', 'r')
+        f = open('./filenames/kitti15_adv_flow_val.txt', 'r')
         mean = [0.5, 0.5, 0.5]
         std = [0.5, 0.5, 0.5]
         channels, height, width = input_shape
@@ -264,8 +264,8 @@ class ImageDataset2(Dataset):
         self.rootB_error_map = '/home/autel/xzx/CREStereo/vis_results/CREStereo/data/error_map_pfm'
         # self.leftA_files, self.rightA_files, self.dispA_files = self.load_path('filenames/driving_adv.txt')
         # self.leftB_files, self.rightB_files, self.dispB_files = self.load_path('filenames/kitti15_adv.txt')
-        self.leftA_files, self.rightA_files, self.dispA_files,self.leftA_forward,self.flowA = self.load_flow_path('filenames/VKITTI2_adv_flow_debug.txt')
-        self.leftB_files, self.rightB_files, self.dispB_files, self.leftB_forward,self.flowB = self.load_flow_path('filenames/kitti15_adv_flow_train_debug.txt')
+        self.leftA_files, self.rightA_files, self.dispA_files,self.leftA_forward,self.flowA = self.load_flow_path('filenames/VKITTI2_adv_flow.txt')
+        self.leftB_files, self.rightB_files, self.dispB_files, self.leftB_forward,self.flowB = self.load_flow_path('filenames/kitti15_adv_flow_train.txt')
 
     def load_path(self, list_filename):
         lines = read_all_lines(list_filename)
@@ -342,7 +342,7 @@ class ImageDataset2(Dataset):
         leftA_forward = self.load_image(os.path.join(self.rootA, self.leftA_forward[index]))
         leftB_forward = self.load_image(os.path.join(self.rootB, self.leftB_forward[index2]))
         flowA, validA = self.load_flowA(os.path.join(self.rootA,self.flowA[index]))
-        flowB,validB = self.load_flowB(os.path.join(self.rootB,self.flowB[index2]))
+        flowB, validB = self.load_flowB(os.path.join(self.rootB,self.flowB[index2]))
         # print('flowA的shape:',flowA.shape)
         # validA = (abs(flowA[0]) < 1000) & (abs(flowA[1]) < 1000)
         #validA = validA.float()
@@ -368,7 +368,7 @@ class ImageDataset2(Dataset):
         #print('flowB.shape',flowB.shape)
         flowA = flowA[y1:y1+crop_h, x1:x1+crop_w]
         flowB = flowB[y2:y2+crop_h, x2:x2+crop_w]
-        #validA = validA[y1:y1+crop_h, x1:x1+crop_w]
+        validA = validA[y1:y1+crop_h, x1:x1+crop_w]
         validB = validB[y2:y2+crop_h, x2:x2+crop_w]
 
         if self.left_right_consistency:
@@ -386,7 +386,7 @@ class ImageDataset2(Dataset):
 
         return {"leftA": leftA, "rightA": rightA, "dispA": dispA,'leftA_forward':leftA_forward,'flowA': flowA, \
         "leftB": leftB, "rightB": rightB, "dispB": dispB, "error_mapB": error_mapB,'leftB_forward':leftB_forward, 'flowB': flowB,\
-        "validA": [] , "validB": validB}
+        "validA": validA , "validB": validB}
 
     def __len__(self):
         return len(self.leftA_files)

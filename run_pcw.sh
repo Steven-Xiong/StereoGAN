@@ -5,11 +5,11 @@ model_name="StereoGAN_maxdisp192_cycle10_id5_corr1_ms1e-1_invwarp5_invdispwarp5_
 
 python -u train_pcwnet.py \
 --model_type='pcwnet' \
---source_dataset='driving' \
+--source_dataset='VKITTI2' \
 --batch_size=2 \
 --test_batch_size=2 \
---lr_rate=2e-5 \
---lr_gan=2e-5 \
+--lr_rate=5e-4 \
+--lr_gan=1e-5 \
 --train_ratio_gan=3 \
 --total_epochs=111 \
 --save_interval=5 \

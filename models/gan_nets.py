@@ -205,6 +205,12 @@ class GeneratorResNet(nn.Module):
                     y2 = bilinear_sampler(x2, offset[-3], 'zeros')
                     loss_warp = warp_loss([y, y1, y2], feat_gt, weights=[0.5,0.5,0.7])
                     return loss_warp
+
+                # elif len(offset) == 1: #不提取多维度特征
+                #     y = bilinear_sampler(x2, offset[-1], 'zeros')
+                #     loss_warp = warp_loss([y],feat_gt, weights =[1.0])
+                #     return loss_warp
+                    
                 else:
                     y = bilinear_sampler(x, F.max_pool2d(offset,4,4)/4, 'zeros')
                     y1 = bilinear_sampler(x1, F.max_pool2d(offset,2,2)/2, 'zeros')
@@ -319,12 +325,12 @@ class GeneratorResNet_debug(nn.Module):
                     y2 = bilinear_sampler(x2, offset[-3], 'zeros')  # x2.shape[2,64,256,512] offset[-3].shape:[2,1,256,512]
                     loss_warp = warp_loss([y, y1, y2], feat_gt, weights=[0.5,0.5,0.7]) 
                     return loss_warp
-                elif len(offset) == 1: #不提取多维度特征
-                    y = bilinear_sampler(x2, offset[-1], 'zeros')
-                    loss_warp = warp_loss([y],feat_gt, weights =[1.0])
-                    return loss_warp
+                # elif len(offset) == 1: #不提取多维度特征
+                #     y = bilinear_sampler(x2, offset[-1], 'zeros')
+                #     loss_warp = warp_loss([y],feat_gt, weights =[1.0])
+                #     return loss_warp
                 else:
-                    y = bilinear_sampler(x, F.max_pool2d(offset,4,4)/4, 'zeros')
+                    y = bilinear_sampler(x, F.max_pool2d(offset,4,4)/4, 'zeros') #自己写要跟这个一致
                     y1 = bilinear_sampler(x1, F.max_pool2d(offset,2,2)/2, 'zeros')
                     y2 = bilinear_sampler(x2, offset, 'zeros')
                 if feat_gt is not None:

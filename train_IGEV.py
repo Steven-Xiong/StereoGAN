@@ -29,7 +29,7 @@ import cv2 as cv
 #自己写的downsample
 from models.bilinear_sampler import downsample_optical_flow
 from IGEV.igev_stereo import IGEVStereo
-from IGEV.loss import sequence_loss
+from IGEV.loss import sequence_loss, corr_loss
 
 def val(valloader, net, writer,iters, epoch=1, board_save=True):
     net.eval()
@@ -40,7 +40,7 @@ def val(valloader, net, writer,iters, epoch=1, board_save=True):
         right_img = right_img.cuda()
         disp_gt = disp_gt.cuda()
         i = i + 1
-        mask = (disp_gt < args.maxdisp) & (disp_gt > 0)
+        mask = (disp_gt < args.maxdisp) & (disp_gt > 0) #有的是0.5？
         if args.IGEV:
             disp_est = net(left_img, right_img, iters=iters, test_mode=True).squeeze(1)  #取最后一维度？
         else:
@@ -465,7 +465,8 @@ def train(args):
             leftB_forward = batch['leftB_forward'].to(device)
             flowA = batch['flowA'].to(device)
             flowB = batch['flowB'].to(device)
-            #validA = batch['validA'].to(device)
+            if args.source_dataset == 'VKITTI2':
+                validA = batch['validA'].to(device)  #VKITTI2直接有, driving为空
             validB = batch['validB'].to(device)
             out_shape = (leftA.size(0), 1, args.img_height//16, args.img_width//16)
             valid = torch.cuda.FloatTensor(np.ones(out_shape))
@@ -485,8 +486,10 @@ def train(args):
                 loss_id = (loss_id_A + loss_id_B) / 2
 
                 if args.lambda_warp_inv:
+                    #import pdb; pdb.set_trace()
                     fake_leftB, fake_leftB_feats = G_AB(leftA, extract_feat=True)
-                    fake_leftA, fake_leftA_feats = G_BA(leftB, extract_feat=True)
+                    fake_leftA, fake_leftA_feats = G_BA(leftB, extract_feat=True) #len(fake_leftA_feats)=3
+                    # shape:[0]: ([4, 256, 64, 128]),[1]: ([4, 128, 128, 256]),[2]:([4, 64, 256, 512])
                     # add forward
                     fake_leftA_forward, fake_leftA_forward_feats = G_BA(leftB_forward, extract_feat=True)
                 else:
@@ -567,15 +570,19 @@ def train(args):
 
                 # corr loss
                 if args.lambda_corr:
-                    #要 extract feature
+                    #要 extract feature: progressive refine loss
                     if args.IGEV:
                         corrB_init, corrB = net(leftB, rightB, iters = args.train_iters)
                         corrB1_init, corrB1 = net(leftB, rec_rightB, iters = args.train_iters)
                         corrB2_init, corrB2 = net(rec_leftB, rightB, iters = args.train_iters)
                         corrB3_init, corrB3 = net(rec_leftB, rec_rightB,iters = args.train_iters)
                         #print(corrB[0].shape,corrB1[0].shape,corrB2[0].shape,corrB3[0].shape)
-                        # import pdb; pdb.set_trace() 这里是带个[0]?
-                        loss_corr = (criterion_identity(corrB1, corrB)+criterion_identity(corrB2, corrB)+criterion_identity(corrB3, corrB))/3
+                        #import pdb; pdb.set_trace() #这里是带个[0]?
+                        loss_corr1 = corr_loss(corrB1, corrB1_init, corrB, corrB_init, max_disp=args.max_disp)
+                        loss_corr2 = corr_loss(corrB2, corrB2_init, corrB, corrB_init, max_disp=args.max_disp)
+                        loss_corr3 = corr_loss(corrB3, corrB3_init, corrB, corrB_init, max_disp=args.max_disp)
+                        loss_corr = (loss_corr1+loss_corr2+loss_corr3)/3
+                        
                     else:
                         #import pdb; pdb.set_trace()
                         corrB = net(leftB, rightB, extract_feat=True) #shape[n_gpu,41,64,128]
@@ -651,27 +658,40 @@ def train(args):
                 #print(pred_disps[0].shape, pred_disps[1].shape,pred_disps[2].shape,pred_disps[-1].shape)
 
                 if args.lambda_disp_warp_inv:
-                    #import pdb; pdb.set_trace()
-                    disp_warp = [-pred_disps[-1]]
-                    #print(fake_leftA_feats[0][0].shape)
-                    if args.debug:
-                        loss_disp_warp_inv = G_BA_debug(rightB, disp_warp, True, fake_leftA_feats[-1].detach())
-                    else:
-                        loss_disp_warp_inv = G_BA(rightB, disp_warp, True, fake_leftA[-1].detach())
-                    #print(loss_disp_warp_inv)
-                    #import pdb; pdb.set_trace()
-                    loss_disp_warp_inv = loss_disp_warp_inv.mean()
+                    
+                    loss_gamma = 0.9
+                    n_predictions = len(pred_disps)
+                    for i in range(n_predictions-3, n_predictions):
+                        
+                        adjusted_loss_gamma = loss_gamma**(15/(n_predictions - 1))
+                        i_weight = adjusted_loss_gamma**(n_predictions - i - 1)
+                        disp_warp = -pred_disps[i]
+                        #print(fake_leftA_feats[0][0].shape)
+                        if args.debug:
+                            fake_leftA_warp,loss_disp_warp_inv1 = G_BA_debug(rightB, disp_warp, True, [x.detach() for x in fake_leftA_feats])
+                        else:
+                            fake_leftA_warp,loss_disp_warp_inv1 = G_BA(rightB, disp_warp, True, [x.detach() for x in fake_leftA_feats])
+                            #loss_disp_warp_inv = G_BA(rightB, disp_warp, True, fake_leftA[-1].detach())
+                        #print(loss_disp_warp_inv)
+                        #import pdb; pdb.set_trace()
+                        loss_disp_warp_inv += loss_disp_warp_inv1.mean()*i_weight
+                        #print(loss_disp_warp_inv)
                 else:
                     loss_disp_warp_inv = 0
-
+                #import pdb; pdb.set_trace()
                 if args.lambda_disp_warp:
-                    
-                    disp_warp = [pred_disps[-1]] # len:4 shape:[1,1,256,512],[1,1,128,256],[1,1,64,128],[1,1,32,64]
-                    if args.debug:
-                        loss_disp_warp = G_BA_debug(leftB, disp_warp, True, fake_rightA_feats[-1].detach())
-                    else:
-                        loss_disp_warp = G_BA_debug(leftB, disp_warp, True, fake_rightA[-1].detach())
-                    loss_disp_warp = loss_disp_warp.mean()
+                    loss_gamma = 0.9
+                    n_predictions = len(pred_disps)
+                    for i in range(n_predictions-3, n_predictions):
+                        adjusted_loss_gamma = loss_gamma**(15/(n_predictions - 1))
+                        i_weight = adjusted_loss_gamma**(n_predictions - i - 1)
+                        disp_warp = pred_disps[i] # len:4 shape:[1,1,256,512],[1,1,128,256],[1,1,64,128],[1,1,32,64]
+                        if args.debug:
+                            fake_rightA_warp, loss_disp_warp1 = G_BA_debug(leftB, disp_warp, True, [x.detach() for x in fake_rightA_feats])
+                        else:
+                            fake_rightA_warp, loss_disp_warp1 = G_BA(leftB, disp_warp, True, [x.detach() for x in fake_rightA_feats])
+                            #loss_disp_warp = G_BA(leftB, disp_warp, True, fake_rightA[-1].detach())
+                        loss_disp_warp += loss_disp_warp1.mean()*i_weight
                 else:
                     loss_disp_warp = 0   
 
@@ -732,7 +752,15 @@ def train(args):
                 #print('flowA.shape:',flowA.shape)
                 #print('flow_preds.shape:',flow_preds[0].shape, len(flow_preds))
                 #print(flowA[0,0].shape, flowA[0,1].shape)
-                validA = (flowA[:,0,:,:].abs() < 1000) & (flowA[:,1,:,:].abs() < 1000)
+                
+                if args.source_dataset == 'driving':
+                    validA = (flowA[:,0,:,:].abs() < 1000) & (flowA[:,1,:,:].abs() < 1000)
+                elif args.source_dataset == 'VKITTI2':
+                    validA = validA
+                else:
+                    print('dataset name error!')
+                    raise "No suportive dataset"
+
                 validA = validA.float()  #解决这里
                 #print('validA.shape',validA.shape)
                 loss_flow, metrics = flow_loss_func(flow_preds, flowA, validA,
@@ -757,26 +785,34 @@ def train(args):
                 #import pdb; pdb.set_trace() 
                 if args.lambda_flow_warp_inv:
                     #flow_preds: len = 4, flow_preds[0].shape = [1,2,256,512], flow_preds[1].shape = [1,2,256,512]
-            
+                    
                     num_downsample = 3
                     flow_predsx = flow_preds[-1][:,0,:,:].unsqueeze(1)
                     flow_predsy = flow_preds[-1][:,1,:,:].unsqueeze(1)
-                    flow_inv_warpx = downsample_optical_flow(flow_predsx, downsample_factor=1/2, num_downsample=num_downsample)
-                    flow_inv_warpy = downsample_optical_flow(flow_predsy, downsample_factor=1/2, num_downsample=num_downsample)
+                    #flow_inv_warpx = downsample_optical_flow(flow_predsx, downsample_factor=1/2, num_downsample=num_downsample)
+                    #flow_inv_warpy = downsample_optical_flow(flow_predsy, downsample_factor=1/2, num_downsample=num_downsample)
                     #作反向warp
-                    flow_inv_warpx = [-flow_inv_warpx[i] for i in range(3)]
-                    flow_inv_warpy = [-flow_inv_warpy[i] for i in range(3)]
+                    # flow_inv_warpx = [-flow_inv_warpx[i] for i in range(3)]
+                    # flow_inv_warpy = [-flow_inv_warpy[i] for i in range(3)]
                     # leftB_forward+inv_flow之后，得到warp之后的warped_leftB, 和fake_leftA的feature做loss
-                    if args.debug:
-                        loss_flow_warpx_inv = G_BA_debug(leftB_forward, flow_inv_warpx, True, [x.detach() for x in fake_leftA_feats])
-                        loss_flow_warpy_inv = G_BA_debug(leftB_forward, flow_inv_warpy, True, [x.detach() for x in fake_leftA_feats])
-                    else:
-                        loss_flow_warpx_inv = G_BA(leftB_forward, flow_inv_warpx, True, [x.detach() for x in fake_leftA_feats])
-                        loss_flow_warpy_inv = G_BA(leftB_forward, flow_inv_warpy, True, [x.detach() for x in fake_leftA_feats])
-                        #loss_flow_warpx = G_BA(leftB, flow_warpx, True, [x.detach() for x in fake_rightA_feats])
-                        #loss_flow_warpy = G_BA(leftB, flow_warpy, True, [x.detach() for x in fake_rightA_feats])
-                    loss_flow_warp = loss_flow_warpx_inv+loss_flow_warpy_inv
-                    loss_flow_warp = loss_flow_warp.mean()
+                    gamma = 0.9
+                    n_predictions = len(flow_preds) 
+                    for i in range(n_predictions):
+                        i_weight = gamma ** (n_predictions - i - 1)
+                        flow_inv_warp = -flow_preds[i]  
+                        flow_inv_warpx = flow_inv_warp[:,0,:,:].unsqueeze(1)
+                        flow_inv_warpy = flow_inv_warp[:,1,:,:].unsqueeze(1)
+                        if args.debug:
+                            fake_leftA_inv_warpx,loss_flow_warpx_inv = G_BA_debug(leftB_forward, flow_inv_warpx, True, [x.detach() for x in fake_leftA_feats])
+                            fake_leftA_inv_warpy,loss_flow_warpy_inv = G_BA_debug(leftB_forward, flow_inv_warpy, True, [x.detach() for x in fake_leftA_feats])
+                        else:
+                            fake_leftA_inv_warpx,loss_flow_warpx_inv = G_BA(leftB_forward, flow_inv_warpx, True, [x.detach() for x in fake_leftA_feats])
+                            fake_leftA_inv_warpy,loss_flow_warpy_inv = G_BA(leftB_forward, flow_inv_warpy, True, [x.detach() for x in fake_leftA_feats])
+                            #loss_flow_warpx = G_BA(leftB, flow_warpx, True, [x.detach() for x in fake_rightA_feats])
+                            #loss_flow_warpy = G_BA(leftB, flow_warpy, True, [x.detach() for x in fake_rightA_feats])
+                        loss_flow_warp_inv1 = loss_flow_warpx_inv+loss_flow_warpy_inv
+                        loss_flow_warp_inv += loss_flow_warp_inv1.mean() * i_weight
+                        #print(loss_flow_warp_inv)
 
                 else:
                     loss_flow_warp_inv = 0
@@ -793,8 +829,8 @@ def train(args):
                     #flow_warp = downsample_optical_flow(flow_preds[-1], downsample_factor=1/2, num_downsample=num_downsample)
                     flow_predsx = flow_preds[-1][:,0,:,:].unsqueeze(1)
                     flow_predsy = flow_preds[-1][:,1,:,:].unsqueeze(1)
-                    flow_warpx = downsample_optical_flow(flow_predsx, downsample_factor=1/2, num_downsample=num_downsample)
-                    flow_warpy = downsample_optical_flow(flow_predsy, downsample_factor=1/2, num_downsample=num_downsample)
+                    #flow_warpx = downsample_optical_flow(flow_predsx, downsample_factor=1/2, num_downsample=num_downsample)
+                    #flow_warpy = downsample_optical_flow(flow_predsy, downsample_factor=1/2, num_downsample=num_downsample)
                     #disp_warp = [disp_ests[i] for i in range(3)]
                     #loss_disp_warp = G_BA_debug(leftB, disp_warp, True, [x.detach() for x in fake_rightA_feats])
                     #import pdb; pdb.set_trace()
@@ -803,16 +839,25 @@ def train(args):
                     #import pdb; pdb.set_trace()
                     #这里应当是leftB_forward? 不对，warp得到的应该是预测的flow. leftB 到fake_leftA_forward_feats
                     # leftB_forward 到fake_leftA_feats
+                    gamma = 0.9
+                    n_predictions = len(flow_preds)
+                    #import pdb; pdb.set_trace()
+                    for i in range(n_predictions):
+                        i_weight = gamma ** (n_predictions - i - 1)
+                        flow_warp = flow_preds[i]  
+                        flow_warpx = flow_warp[:,0,:,:].unsqueeze(1)
+                        flow_warpy = flow_warp[:,1,:,:].unsqueeze(1) 
 
-                    if args.debug:
-                        loss_flow_warpx = G_BA_debug(leftB, flow_warpx, True, [x.detach() for x in fake_leftA_forward_feats])
-                        loss_flow_warpy = G_BA_debug(leftB, flow_warpy, True, [x.detach() for x in fake_leftA_forward_feats])
-                    else:
-                        loss_flow_warpx = G_BA(leftB, flow_warpx, True, [x.detach() for x in fake_leftA_forward_feats])
-                        loss_flow_warpy = G_BA(leftB, flow_warpy, True, [x.detach() for x in fake_leftA_forward_feats])
-                        
-                    loss_flow_warp = loss_flow_warpx+loss_flow_warpy
-                    loss_flow_warp = loss_flow_warp.mean()
+                        if args.debug:
+                            fake_leftA_forward_warpx, loss_flow_warpx = G_BA_debug(leftB, flow_warpx, True, [x.detach() for x in fake_leftA_forward_feats])
+                            fake_leftA_forward_warpy,loss_flow_warpy = G_BA_debug(leftB, flow_warpy, True, [x.detach() for x in fake_leftA_forward_feats])
+                        else:
+                            fake_leftA_forward_warpx, loss_flow_warpx = G_BA(leftB, flow_warpx, True, [x.detach() for x in fake_leftA_forward_feats])
+                            fake_leftA_forward_warpy,loss_flow_warpy = G_BA(leftB, flow_warpy, True, [x.detach() for x in fake_leftA_forward_feats])
+                            
+                        loss_flow_warp1 = loss_flow_warpx+loss_flow_warpy
+                        loss_flow_warp += loss_flow_warp1.mean()*i_weight
+                        #print(loss_flow_warp)
                 else:
                     loss_flow_warp = 0
             else:
@@ -840,7 +885,7 @@ def train(args):
                 writer.add_scalar('loss/loss_disp_warp_inv', loss_disp_warp_inv, train_loss_meter.count * print_freq)
                 writer.add_scalar('loss/loss_flow_warp_inv', loss_flow_warp_inv, train_loss_meter.count * print_freq)
                 writer.add_scalar('loss/loss_flow_warp', loss_flow_warp, train_loss_meter.count * print_freq)
-                writer.add_scalar('loss/loss_left_right',left_right_loss,train_loss_meter.count * print_freq)
+                #writer.add_scalar('loss/loss_left_right',left_right_loss,train_loss_meter.count * print_freq)
                 writer.add_scalar('loss/loss_smooth_main', loss_smooth_main, train_loss_meter.count * print_freq)
 
                 if i % args.train_ratio_gan == 0:
@@ -1049,4 +1094,6 @@ if __name__ == '__main__':
     parser.add_argument('--max_disp', type=int, default=192, help="max disp of geometry encoding volume")
 
     args = parser.parse_args()
+    torch.manual_seed(3407)
+    np.random.seed(3407)
     train(args)

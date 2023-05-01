@@ -1,5 +1,5 @@
 from .pwcnet import PWCNet_G, PWCNet_GC
-from .loss import model_loss
+from .loss import model_loss,corr_loss
 
 __models__ = {
     "gwcnet-g": PWCNet_G,
