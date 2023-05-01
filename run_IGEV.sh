@@ -1,7 +1,7 @@
 #!/bin/bash
 
 now=$(date +"%Y%m%d_%H%M%S")
-model_name="StereoGAN_maxdisp192_cycle10_id5_corr1_ms1e-1_invwarp5_invdispwarp5_warp5_dispwarp5_imwidth512_height256_ep100_lr2e-5_gan2e-5_baseline_GMflow_lr_flow1e-4_bs4_warp5_IGEV_try"
+model_name="driving_dispnet_maxdisp192_cycle10_id5_corr1_ms1e-1_invwarp5_invdispwarp5_warp5_dispwarp5_imwidth512_height256_ep100_IGEVlr1e-4_gan2e-5_baseline_GMflow_lr_flow1e-4_bs4_warp5_IGEV"
 
 python -u train_IGEV.py \
 --model_type='IGEV' \
@@ -15,8 +15,8 @@ python -u train_IGEV.py \
 --save_interval=5 \
 --print_freq=220 \
 --checkpoint_save_path="stereogan_checkpoints/${model_name}" \
---load_checkpoints 0 \
---load_from_mgpus_model 0 \
+--load_checkpoints 1 \
+--load_from_mgpus_model 1 \
 --writer=${model_name} \
 --use_multi_gpu=2 \
 --img_height=256 \
@@ -45,6 +45,9 @@ python -u train_IGEV.py \
 --lambda_flow_warp 5 \
 --lambda_flow_warp_inv 5 \
 --debug 0 \
-#2>&1 | tee ./logs/train-$model_name-$now.log &
+--load_IGEV_path 'stereogan_checkpoints/driving_dispnet_maxdisp192_cycle10_id5_corr1_ms1e-1_invwarp5_invdispwarp5_warp5_dispwarp5_imwidth512_height256_ep100_IGEVlr1e-4_gan2e-5_baseline_GMflow_lr_flow1e-4_bs4_warp5_IGEV/ep12_D1_0.2277_EPE2.6143_Thres2s0.3806_Thres4s0.1471_Thres5s0.1000_epe_flow10.8877_f1_all0.4376_epe1_flow17.8709_fl_all10.5885.pth' \
+--load_gan_path 'stereogan_checkpoints/driving_dispnet_maxdisp192_cycle10_id5_corr1_ms1e-1_invwarp5_invdispwarp5_warp5_dispwarp5_imwidth512_height256_ep100_IGEVlr1e-4_gan2e-5_baseline_GMflow_lr_flow1e-4_bs4_warp5_IGEV/ep12_D1_0.2277_EPE2.6143_Thres2s0.3806_Thres4s0.1471_Thres5s0.1000_epe_flow10.8877_f1_all0.4376_epe1_flow17.8709_fl_all10.5885.pth' \
+--load_flownet_path 'stereogan_checkpoints/driving_dispnet_maxdisp192_cycle10_id5_corr1_ms1e-1_invwarp5_invdispwarp5_warp5_dispwarp5_imwidth512_height256_ep100_IGEVlr1e-4_gan2e-5_baseline_GMflow_lr_flow1e-4_bs4_warp5_IGEV/ep12_D1_0.2277_EPE2.6143_Thres2s0.3806_Thres4s0.1471_Thres5s0.1000_epe_flow10.8877_f1_all0.4376_epe1_flow17.8709_fl_all10.5885.pth' \
+2>&1 | tee ./logs/train-$model_name-$now.log &
 
 #dataset: 'driving', 'VKITTI2'
