@@ -318,6 +318,7 @@ class GeneratorResNet_debug(nn.Module):
                 raise "Non-supportive relax"
             return loss_lz
         if offset is not None:
+            #import pdb; pdb.set_trace()
             if extract_feat:
                 if len(offset) == 3: #对应flow_warp
                     y = bilinear_sampler(x, offset[-1], 'zeros')    # x.shape: [2,256,64,128] offset[-1].shape:[2,1,64,128]
