@@ -1,16 +1,13 @@
 #!/bin/bash
 
 now=$(date +"%Y%m%d_%H%M%S")
-model_name="flownets_baseline_driving"
+model_name="flownets_baseline_VKITTI2"
 
 python -u train_flownet_baseline.py \
---model_type='dispnet' \
---source_dataset='driving' \
---batch_size=4 \
+--model_type='flownets' \
+--source_dataset='VKITTI2' \
+--batch_size=16 \
 --test_batch_size=4 \
---lr_rate=2e-5 \
---lr_gan=2e-5 \
---train_ratio_gan=3 \
 --total_epochs=101 \
 --save_interval=5 \
 --print_freq=220 \
@@ -18,12 +15,12 @@ python -u train_flownet_baseline.py \
 --load_checkpoints 0 \
 --load_from_mgpus_model 0 \
 --writer=${model_name} \
---use_multi_gpu=2 \
+--use_multi_gpu=0 \
 --img_height=256 \
 --img_width=512 \
 --maxdisp=192 \
 --flow=1 \
---lr_flow 1e-4 \
+--lr_flow 2e-4 \
 --unimatch_stereo 0 \
 --debug 0 \
 2>&1 | tee ./logs/train-$model_name-$now.log &

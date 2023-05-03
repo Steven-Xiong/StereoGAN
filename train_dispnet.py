@@ -13,7 +13,7 @@ import torch.nn.functional as F
 from models.loss import warp_loss, model_loss0
 from models.dispnet import dispnetcorr
 from models.gan_nets import GeneratorResNet, Discriminator, weights_init_normal
-from dataset import ImageDataset, ValJointImageDataset
+from dataset import ImageDataset, ValJointImageDataset, ImageDataset2
 
 from tensorboardX import SummaryWriter
 import torchvision.utils as vutils
@@ -104,14 +104,14 @@ def train(args):
 
     # data loader
     if args.source_dataset == 'driving':
-        dataset = ImageDataset(height=args.img_height, width=args.img_width)
-    elif args.source_dataset == 'synthia':
-        dataset = ImageDataset2(height=args.img_height, width=args.img_width)
+        dataset = ImageDataset(height=args.img_height, width=args.img_width,left_right_consistency = args.left_right_consistency)
+    elif args.source_dataset == 'VKITTI2':
+        dataset = ImageDataset2(height=args.img_height, width=args.img_width,left_right_consistency = args.left_right_consistency)
     else:
         raise "No suportive dataset"
-    trainloader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
+    trainloader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=8)
     valdataset = ValJointImageDataset()
-    valloader = torch.utils.data.DataLoader(valdataset, batch_size=args.test_batch_size, shuffle=False, num_workers=1)
+    valloader = torch.utils.data.DataLoader(valdataset, batch_size=args.test_batch_size, shuffle=False, num_workers=8)
 
     train_loss_meter = AverageMeter()
     val_loss_meter = AverageMeter()
@@ -214,6 +214,8 @@ if __name__ == '__main__':
     # tensorboard, print freq
     parser.add_argument('--writer', nargs='?', type=str, default='StereoGAN')
     parser.add_argument('--print_freq', '-p', default=150, type=int, metavar='N', help='print frequency (default: 150)')
+
+    parser.add_argument('--left_right_consistency', type = float, default = 0)
 
     # other
     parser.add_argument('--use_multi_gpu', nargs='?', type=int, default=0, help='the number of multi gpu to use')

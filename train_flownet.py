@@ -121,7 +121,7 @@ def val_flow(valloader, net_flow, writer, epoch=1, board_save=True):
         
         input = [left_img,left_forward]
         input = torch.cat(input,1).to(device)
-        import pdb; pdb.set_trace()
+        #import pdb; pdb.set_trace()
         flow_preds = net_flow(input)
         flow_preds = [flow_preds]
         flow_preds_sampled = upsample_optical_flow(flow_preds,sample_factor=4, num_upsample=1)
@@ -421,9 +421,9 @@ def train(args):
         raise "No suportive dataset"
     #import pdb; pdb.set_trace()
     #dataset.get_item(1)
-    trainloader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=16)
+    trainloader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
     valdataset = ValJointImageDataset()
-    valloader = torch.utils.data.DataLoader(valdataset, batch_size=args.test_batch_size, shuffle=False, num_workers=16)
+    valloader = torch.utils.data.DataLoader(valdataset, batch_size=args.test_batch_size, shuffle=False, num_workers=4)
 
     train_loss_meter = AverageMeter()
     val_loss_meter = AverageMeter()

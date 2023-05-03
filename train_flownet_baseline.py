@@ -180,7 +180,6 @@ def train(args):
             if args.load_flownet_path:
                 net_flow = load_multi_gpu_checkpoint(net_flow,args.load_flownet_path,'model_flow')
             else:
-                #pass
                 net_flow.apply(weights_init_normal) #初始化?
 
             # G_A_forward = load_multi_gpu_checkpoint(G_A_forward, args.load_gan_path, 'G_A_forward')
@@ -214,34 +213,19 @@ def train(args):
     start_epoch = 0
     if args.load_checkpoints:
         print('load optimizer')
-        checkpoint = torch.load(args.load_dispnet_path,map_location = device)
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        start_epoch = checkpoint['epoch']+1
         
-        if args.flow:
-            optimizer_flow.load_state_dict(checkpoint['optimizer_flow_state_dict'])
-            for state in optimizer_flow.state.values():
-                for k, v in state.items():
-                    if torch.is_tensor(v):
-                        state[k] = v.cuda()
+        optimizer_flow.load_state_dict(checkpoint['optimizer_flow_state_dict'])
+        for state in optimizer_flow.state.values():
+            for k, v in state.items():
+                if torch.is_tensor(v):
+                    state[k] = v.cuda()
 
         
     if args.use_multi_gpu:
         print("Let's use", torch.cuda.device_count(), "GPUs!")
-
-        if args.debug:
-            G_AB_debug = nn.DataParallel(G_AB_debug,device_ids=list(range(args.use_multi_gpu)))
-            G_BA_debug = nn.DataParallel(G_BA_debug,device_ids=list(range(args.use_multi_gpu)))
         if args.flow:
             net_flow = nn.DataParallel(net_flow, device_ids=list(range(args.use_multi_gpu)))
-            # G_A_forward = nn.DataParallel(G_A_forward,device_ids=list(range(args.use_multi_gpu)))
-            # G_A_backward = nn.DataParallel(G_A_backward,device_ids=list(range(args.use_multi_gpu)))
-            # D_A_forward = nn.DataParallel(D_A_forward, device_ids=list(range(args.use_multi_gpu)))
-            # D_A_backward = nn.DataParallel(D_A_backward, device_ids=list(range(args.use_multi_gpu)))
-
-    if args.debug:
-        G_AB_debug.to(device)
-        G_BA_debug.to(device)
+            
     if args.flow:
         net_flow.to(device)
 
@@ -261,18 +245,13 @@ def train(args):
         raise "No suportive dataset"
     #import pdb; pdb.set_trace()
     #dataset.get_item(1)
-    trainloader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=16)
+    trainloader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=16,pin_memory=True,prefetch_factor=4)
     valdataset = ValJointImageDataset()
     valloader = torch.utils.data.DataLoader(valdataset, batch_size=args.test_batch_size, shuffle=False, num_workers=16)
 
     train_loss_meter = AverageMeter()
     val_loss_meter = AverageMeter()
 
-    ## debug only
-    #with torch.no_grad():
-    #    l1_test_loss, out_val = val(valloader, net, G_AB, None, writer, epoch=0, board_save=True)
-    #    val_loss_meter.update(l1_test_loss)
-    #    print('Val epoch[{}/{}] loss: {}'.format(0, args.total_epochs, l1_test_loss))
 
     print('begin training...')
     print('start_epoch:', start_epoch)
