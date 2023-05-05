@@ -270,7 +270,7 @@ def train(args):
             else:
                 net.apply(weights_init_normal)
             if args.load_flownet_path:
-                net_flow = load_checkpoint(net_flow, args.load_checkpoint_path, device)
+                net_flow = load_checkpoint(net_flow, args.load_flownet_path, device)
             else:
                 net_flow.apply(weights_init_normal)   #可能有问题？
             G_AB = load_checkpoint(G_AB, args.load_gan_path, 'G_AB')
@@ -321,6 +321,8 @@ def train(args):
     if args.load_checkpoints:
         print('load optimizer')
         checkpoint = torch.load(args.load_IGEV_path,map_location = device)
+        checkpoint_gan = torch.load(args.load_gan_path,map_location = device)
+        checkpoint_flow = torch.load(args.load_flownet_path,map_location = device)
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         start_epoch = checkpoint['epoch']+1
         
@@ -328,23 +330,23 @@ def train(args):
             for k, v in state.items():
                 if torch.is_tensor(v):
                     state[k] = v.cuda()
-        optimizer_G.load_state_dict(checkpoint['optimizer_G_state_dict'])
+        optimizer_G.load_state_dict(checkpoint_gan['optimizer_G_state_dict'])
         for state in optimizer_G.state.values():
             for k, v in state.items():
                 if torch.is_tensor(v):
                     state[k] = v.cuda()
-        optimizer_D_A.load_state_dict(checkpoint['optimizer_DA_state_dict'])
+        optimizer_D_A.load_state_dict(checkpoint_gan['optimizer_DA_state_dict'])
         for state in optimizer_D_A.state.values():
             for k, v in state.items():
                 if torch.is_tensor(v):
                     state[k] = v.cuda()
-        optimizer_D_B.load_state_dict(checkpoint['optimizer_DB_state_dict'])
+        optimizer_D_B.load_state_dict(checkpoint_gan['optimizer_DB_state_dict'])
         for state in optimizer_D_B.state.values():
             for k, v in state.items():
                 if torch.is_tensor(v):
                     state[k] = v.cuda()
         if args.flow:
-            optimizer_flow.load_state_dict(checkpoint['optimizer_flow_state_dict'])
+            optimizer_flow.load_state_dict(checkpoint_flow['optimizer_flow_state_dict'])
             for state in optimizer_flow.state.values():
                 for k, v in state.items():
                     if torch.is_tensor(v):
@@ -631,13 +633,13 @@ def train(args):
                 net.module.freeze_bn() # We keep BatchNorm frozen
             G_AB.eval()
             G_BA.eval()
+            if args.flow:
+                net_flow.eval()
             if args.debug:
                 G_AB_debug.eval()
                 G_BA_debug.eval()
             optimizer.zero_grad()
-            if args.flow:
-                net_flow.train()
-                optimizer_flow.zero_grad()
+            
             # import IPython
             # IPython.embed()
             
@@ -728,11 +730,20 @@ def train(args):
                     loss_disp_warp = loss_disp_warp.mean()
                 else:
                     loss_disp_warp = 0
-                
+            
+            loss = loss0 + args.lambda_disp_warp*loss_disp_warp + args.lambda_disp_warp_inv*loss_disp_warp_inv  
+            loss.backward()
+            optimizer.step()
             # add optical flow: flow的image输入输出是否和stereo matching 任务一样？
 
             #left_A_forward用下一帧的右图生成
             #left_A_forward = G()
+
+            if args.flow:
+                net_flow.train()
+                net.eval()
+                optimizer_flow.zero_grad()          
+            loss_flow_all=0
             if args.flow:
                 #print(G_AB(leftA).shape, G_AB.forward(leftA_forward).shape)
                 results_dict = net_flow(G_AB(leftA), G_AB.forward(leftA_forward),
@@ -865,13 +876,11 @@ def train(args):
                 loss_flow_warp_inv = 0
             # 改变思路？
                 
-
-            loss = loss0 + args.lambda_disp_warp*loss_disp_warp + args.lambda_disp_warp_inv*loss_disp_warp_inv  \
-                     + args.smooth_loss * loss_smooth_main + args.flow * loss_flow + args.lambda_flow_warp* loss_flow_warp + args.lambda_flow_warp_inv * loss_flow_warp_inv
-            #print(loss)
-            loss.backward()
-            optimizer.step()
+            
             if args.flow:
+                loss_flow_all = args.flow * loss_flow + args.lambda_flow_warp* loss_flow_warp + args.lambda_flow_warp_inv * loss_flow_warp_inv
+                #print(loss)
+                loss_flow_all.backward()
                 optimizer_flow.step()
 
             if i % print_freq == print_freq - 1:

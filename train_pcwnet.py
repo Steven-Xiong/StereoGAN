@@ -625,10 +625,11 @@ def train(args):
             if args.debug:
                 G_AB_debug.eval()
                 G_BA_debug.eval()
-            optimizer.zero_grad()
             if args.flow:
-                net_flow.train()
-                optimizer_flow.zero_grad()
+                net_flow.eval()
+
+            optimizer.zero_grad()
+            
             # import IPython
             # IPython.embed()
 
@@ -712,7 +713,26 @@ def train(args):
                     loss_disp_warp = 0
                 
             # add optical flow: flow的image输入输出是否和stereo matching 任务一样？
+            if args.smooth_loss:
+                #print(disp_ests[0].shape,leftA.shape, mask.shape)
+                #for i in range(3):
+                #disp_ests = disp_ests.convert('RGB')
+                #print(leftA[mask.repeat(1,3,1,1)])
+                loss_smooth_main = smooth_loss(disp_ests[0],leftA)
+            else:
+                loss_smooth_main = 0
+            
 
+            loss = loss0 + args.lambda_disp_warp*loss_disp_warp + args.lambda_disp_warp_inv*loss_disp_warp_inv  \
+                    + args.smooth_loss * loss_smooth_main 
+            loss.backward()
+            optimizer.step()
+
+            if args.flow:
+                net_flow.train()
+                net.eval()
+                optimizer_flow.zero_grad()
+            loss_flow_all=0
             #left_A_forward用下一帧的右图生成
             #left_A_forward = G()
             if args.flow:
@@ -750,15 +770,8 @@ def train(args):
                                             )
             else:
                 loss_flow, metrics= 0, 0
-            if args.smooth_loss:
-                #print(disp_ests[0].shape,leftA.shape, mask.shape)
-                #for i in range(3):
-                #disp_ests = disp_ests.convert('RGB')
-                #print(leftA[mask.repeat(1,3,1,1)])
-                loss_smooth_main = smooth_loss(disp_ests[0],leftA)
-            else:
-                loss_smooth_main = 0
-            
+        
+
             loss_flow_warp = 0
             loss_flow_warp_inv =0
             # TODO add flow multiscale warp
@@ -846,13 +859,9 @@ def train(args):
                 loss_flow_warp_inv = 0
             # 改变思路？
                 
-
-            loss = loss0 + args.lambda_disp_warp*loss_disp_warp + args.lambda_disp_warp_inv*loss_disp_warp_inv  \
-                     + args.smooth_loss * loss_smooth_main + args.flow * loss_flow + args.lambda_flow_warp* loss_flow_warp + args.lambda_flow_warp_inv * loss_flow_warp_inv
-            #print(loss)
-            loss.backward()
-            optimizer.step()
             if args.flow:
+                loss_flow_all = args.flow * loss_flow + args.lambda_flow_warp* loss_flow_warp + args.lambda_flow_warp_inv * loss_flow_warp_inv
+                loss_flow_all.backward()
                 optimizer_flow.step()
 
             if i % print_freq == print_freq - 1:
@@ -866,7 +875,7 @@ def train(args):
                 writer.add_scalar('loss/loss_disp_warp_inv', loss_disp_warp_inv, train_loss_meter.count * print_freq)
                 writer.add_scalar('loss/loss_flow_warp_inv', loss_flow_warp_inv, train_loss_meter.count * print_freq)
                 writer.add_scalar('loss/loss_flow_warp', loss_flow_warp, train_loss_meter.count * print_freq)
-                writer.add_scalar('loss/loss_left_right',left_right_loss,train_loss_meter.count * print_freq)
+                #writer.add_scalar('loss/loss_left_right',left_right_loss,train_loss_meter.count * print_freq)
                 writer.add_scalar('loss/loss_smooth_main', loss_smooth_main, train_loss_meter.count * print_freq)
 
                 if i % args.train_ratio_gan == 0:

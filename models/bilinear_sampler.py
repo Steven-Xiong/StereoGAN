@@ -137,3 +137,13 @@ def downsample_optical_flow(flow_tensor, downsample_factor=1/2, num_downsample=3
         downscaled_flows.append(downscaled_flow)
 
     return downscaled_flows
+
+def upsample_optical_flow(flow_tensor, sample_factor=2, num_upsample=3):
+    upscaled_flows = []
+    #downscaled_flows.append(flow_tensor)
+    for i in range(num_upsample):
+        upscaled_flow = F.interpolate(flow_tensor[i], scale_factor = sample_factor, 
+            mode='bilinear', align_corners=True) * sample_factor
+        upscaled_flows.append(upscaled_flow)
+
+    return upscaled_flows

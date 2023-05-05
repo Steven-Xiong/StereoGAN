@@ -27,7 +27,11 @@ from utils import pytorch_ssim
 from consistency import apply_disparity,generate_image_left,generate_image_right
 import cv2 as cv
 #自己写的downsample
-from models.bilinear_sampler import downsample_optical_flow
+from models.bilinear_sampler import downsample_optical_flow, upsample_optical_flow
+import flownet
+from flownet.FlowNetC import FlowNetC
+from flownet.FlowNetS import FlowNetS
+from flownet.loss import multiscaleEPE
 
 def val(valloader, net, writer, epoch=1, board_save=True):
     net.eval()
@@ -115,20 +119,19 @@ def val_flow(valloader, net_flow, writer, epoch=1, board_save=True):
         flow_gt = flow_gt.cuda()
         valid_gt = valid_gt.cuda()
         
-        results_dict = net_flow(left, left_forward,
-                                 attn_type=args.attn_type,
-                                 attn_splits_list=args.attn_splits_list,
-                                 corr_radius_list=args.corr_radius_list,
-                                 prop_radius_list=args.prop_radius_list,
-                                 num_reg_refine=args.num_reg_refine,
-                                 task='flow',
-                             )
-        
+        input = [left_img,left_forward]
+        input = torch.cat(input,1).to(device)
+        #import pdb; pdb.set_trace()
+        flow_preds = net_flow(input)
+        flow_preds = [flow_preds]
+        flow_preds_sampled = upsample_optical_flow(flow_preds,sample_factor=4, num_upsample=1)
         # useful when using parallel branches
-        flow_pr = results_dict['flow_preds']
+        #flow_pr = results_dict['flow_preds']
 
         #flow = padder.unpad(flow_pr[0]).cpu()
-        flow = flow_pr[-1]
+        flow = flow_preds_sampled[0]
+        #尺寸不对，还得上采样
+
         #epe = torch.sum((flow - flow_gt) ** 2, dim=0).sqrt()
         #mag = torch.sum(flow_gt ** 2, dim=0).sqrt()
         #import pdb; pdb.set_trace()
@@ -164,7 +167,7 @@ def val_flow(valloader, net_flow, writer, epoch=1, board_save=True):
         total_error += epe1
         fl_error += f1
         '''
-        loss_flow, metrics = flow_loss_func_val(flow_pr, flow_gt, valid_gt,
+        loss_flow, metrics = flow_loss_func_val(flow, flow_gt, valid_gt,
                                             gamma=args.gamma,
                                             max_flow=args.max_flow,
                                             )
@@ -233,14 +236,13 @@ def train(args):
         net = dispnetcorr(args.maxdisp)
     # add optical flow module
     if args.flow:
-        net_flow = UniMatch(feature_channels=args.feature_channels,
-                     num_scales=args.num_scales,
-                     upsample_factor=args.upsample_factor,
-                     num_head=args.num_head,
-                     ffn_dim_expansion=args.ffn_dim_expansion,
-                     num_transformer_layers=args.num_transformer_layers,
-                     reg_refine=args.reg_refine,
-                     task='flow')
+        model_names = sorted(name for name in flownet.__dict__
+                     if name.islower() and not name.startswith("__"))
+        #import pdb; pdb.set_trace()
+        #from flownet import FlowNetC
+        #net_flow = FlowNetC(batchNorm=False)
+        net_flow = FlowNetS(batchNorm=False)
+        #net_flow = flownet.__dict__['flownetc']
 
     G_AB = GeneratorResNet(input_shape, 2)    # 定义用到的generative model
     G_BA = GeneratorResNet(input_shape, 2)
@@ -264,7 +266,8 @@ def train(args):
             if args.load_flownet_path:
                 net_flow = load_multi_gpu_checkpoint(net_flow,args.load_flownet_path,'model_flow')
             else:
-                net_flow.apply(weights_init_normal)
+                pass
+                #net_flow.apply(weights_init_normal) #初始化?
             G_AB = load_multi_gpu_checkpoint(G_AB, args.load_gan_path, 'G_AB')
             G_BA = load_multi_gpu_checkpoint(G_BA, args.load_gan_path, 'G_BA')
             D_A = load_multi_gpu_checkpoint(D_A, args.load_gan_path, 'D_A')
@@ -418,9 +421,9 @@ def train(args):
         raise "No suportive dataset"
     #import pdb; pdb.set_trace()
     #dataset.get_item(1)
-    trainloader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=16)
+    trainloader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
     valdataset = ValJointImageDataset()
-    valloader = torch.utils.data.DataLoader(valdataset, batch_size=args.test_batch_size, shuffle=False, num_workers=16)
+    valloader = torch.utils.data.DataLoader(valdataset, batch_size=args.test_batch_size, shuffle=False, num_workers=4)
 
     train_loss_meter = AverageMeter()
     val_loss_meter = AverageMeter()
@@ -664,12 +667,12 @@ def train(args):
             net.train()
             G_AB.eval()
             G_BA.eval()
+            net_flow.eval()
             if args.debug:
                 G_AB_debug.eval()
                 G_BA_debug.eval()
             optimizer.zero_grad()
-            if args.flow:
-                net_flow.eval()
+            
             # import IPython
             # IPython.embed()
             
@@ -803,7 +806,8 @@ def train(args):
                 if args.lambda_disp_warp_inv:
                     
                     disp_warp = [-disp_ests[i] for i in range(3)] 
-                    #print(fake_leftA_feats[0][0].shape)
+                    #import pdb; pdb.set_trace()
+                    #print(fake_leftA_feats[0][0].shape)  [4,1,256,512]
                     loss_disp_warp_inv = G_BA(rightB, disp_warp, True, [x.detach() for x in fake_leftA_feats])
                     #print(loss_disp_warp_inv)
                     #import pdb; pdb.set_trace()
@@ -817,49 +821,23 @@ def train(args):
                     loss_disp_warp = loss_disp_warp.mean()
                 else:
                     loss_disp_warp = 0
-                
-            # add optical flow: flow的image输入输出是否和stereo matching 任务一样？
-            if args.smooth_loss:
-                #print(disp_ests[0].shape,leftA.shape, mask.shape)
-                #for i in range(3):
-                #disp_ests = disp_ests.convert('RGB')
-                #print(leftA[mask.repeat(1,3,1,1)])
-                loss_smooth_main = smooth_loss(disp_ests[0],leftA)
-            else:
-                loss_smooth_main = 0
             
             loss = loss0 + args.lambda_disp_warp*loss_disp_warp + args.lambda_disp_warp_inv*loss_disp_warp_inv + args.left_right_consistency * left_right_loss \
                      + args.smooth_loss * loss_smooth_main 
             #print(loss)
             loss.backward()
             optimizer.step()
-            
 
+            # add optical flow: flow的image输入输出是否和stereo matching 任务一样？
+            
             if args.flow:
-                net.eval()
                 net_flow.train()
+                net.eval()
                 optimizer_flow.zero_grad()
             loss_flow_all = 0
-            loss_flow_warp = 0
-            loss_flow_warp_inv =0
-
             #left_A_forward用下一帧的右图生成
             #left_A_forward = G()
             if args.flow:
-                #print(G_AB(leftA).shape, G_AB.forward(leftA_forward).shape)
-                results_dict = net_flow(G_AB(leftA), G_AB.forward(leftA_forward),
-                                 attn_type=args.attn_type,
-                                 attn_splits_list=args.attn_splits_list,
-                                 corr_radius_list=args.corr_radius_list,
-                                 prop_radius_list=args.prop_radius_list,
-                                 num_reg_refine=args.num_reg_refine,
-                                 task='flow',
-                                 )
-                #import pdb; pdb.set_trace()
-                flow_preds = results_dict['flow_preds']   #这里存flow pred模型
-                                                        # flow_gt shape:[1,2,320,1152] valid shape:[1,320,1152]
-                
-                
                 flowA = flowA.permute(0,3,1,2)
                 #print('flowA.shape:',flowA.shape)
                 #print('flow_preds.shape:',flow_preds[0].shape, len(flow_preds))
@@ -874,62 +852,77 @@ def train(args):
 
                 validA = validA.float()  #解决这里
                 #print('validA.shape',validA.shape)
-                loss_flow, metrics = flow_loss_func(flow_preds, flowA, validA,
-                                            gamma=args.gamma,
-                                            max_flow=args.max_flow,
-                                            )
+                #print(G_AB(leftA).shape, G_AB.forward(leftA_forward).shape)
+                img1 = G_AB(leftA)
+                img2 = G_AB.forward(leftA_forward)
+                input = [img1,img2]
+                input = torch.cat(input,1).to(device)
+                flow_preds = net_flow(input)
+                #import pdb; pdb.set_trace()
+                                                        # flow_gt shape:[1,2,320,1152] valid shape:[1,320,1152]
+                loss_flow = multiscaleEPE(flow_preds, flowA, weights=args.multiscale_weights, sparse=args.sparse)
             else:
                 loss_flow, metrics= 0, 0
-           
+            if args.smooth_loss:
+                #print(disp_ests[0].shape,leftA.shape, mask.shape)
+                #for i in range(3):
+                #disp_ests = disp_ests.convert('RGB')
+                #print(leftA[mask.repeat(1,3,1,1)])
+                loss_smooth_main = smooth_loss(disp_ests[0],leftA)
+            else:
+                loss_smooth_main = 0
             
+            loss_flow_warp = 0
+            loss_flow_warp_inv = 0
             # TODO add flow multiscale warp
-            '''
-            if args.flow:
-                #import pdb; pdb.set_trace() 
-                if args.lambda_flow_warp_inv:
-                    #flow_preds: len = 4, flow_preds[0].shape = [1,2,256,512], flow_preds[1].shape = [1,2,256,512]
+            #分解为x方向和y方向, 先上采样
+            b, _, h, w = flowA.shape
+            flow_preds_new =[]
+            flow_predsx_new = []
+            flow_predsy_new = []
+            num_upsample = 3
+            #先把flow采样到正常尺度:
+            for i in range(num_upsample):
+                flow_predsx_new.append(flow_preds[i][:,0,:,:].unsqueeze(1))
+                flow_predsy_new.append(flow_preds[i][:,1,:,:].unsqueeze(1))
+            #import pdb; pdb.set_trace()
+            flow_preds_sampled = upsample_optical_flow(flow_preds,sample_factor=4, num_upsample=num_upsample)
+            #print(flow_preds_sampled[0].shape,flow_preds_sampled[1].shape)
+            flow_predsx = upsample_optical_flow(flow_predsx_new,sample_factor=4, num_upsample=num_upsample)
+            flow_predsy = upsample_optical_flow(flow_predsx_new,sample_factor=4, num_upsample=num_upsample)
             
-                    num_downsample = 3
-                    flow_predsx = flow_preds[-1][:,0,:,:].unsqueeze(1)
-                    flow_predsy = flow_preds[-1][:,1,:,:].unsqueeze(1)
-                    flow_inv_warpx = downsample_optical_flow(flow_predsx, downsample_factor=1/2, num_downsample=num_downsample)
-                    flow_inv_warpy = downsample_optical_flow(flow_predsy, downsample_factor=1/2, num_downsample=num_downsample)
-                    #作反向warp
-                    flow_inv_warpx = [-flow_inv_warpx[i] for i in range(3)]
-                    flow_inv_warpy = [-flow_inv_warpy[i] for i in range(3)]
-                    # leftB_forward+inv_flow之后，得到warp之后的warped_leftB, 和fake_leftA的feature做loss
+            
+            if args.flow:
+                weights = [0.005, 0.01, 0.02, 0.08, 0.32]
+                if args.lambda_disp_warp_inv:
+                    #import pdb; pdb.set_trace()
+                    flow_inv_warp = [-flow_preds_sampled[i] for i in range(3)] 
+                    flow_inv_warpx = [-flow_predsx[i] for i in range(3)] 
+                    flow_inv_warpy = [-flow_predsy[i] for i in range(3)] 
+
+                    # flow_inv_warpx1 = [-flow_preds[i][:,0,:,:].unsqueeze(1) for i in range(3)] 
+                    # flow_inv_warpy1 = [-flow_preds[i][:,1,:,:].unsqueeze(1) for i in range(3)] 
+                    
                     if args.debug:
                         loss_flow_warpx_inv = G_BA_debug(leftB_forward, flow_inv_warpx, True, [x.detach() for x in fake_leftA_feats])
                         loss_flow_warpy_inv = G_BA_debug(leftB_forward, flow_inv_warpy, True, [x.detach() for x in fake_leftA_feats])
+                        #loss_flow_warp_inv = G_BA_debug(leftB_forward, flow_inv_warp, True, [x.detach() for x in fake_leftA_feats])
                     else:
                         loss_flow_warpx_inv = G_BA(leftB_forward, flow_inv_warpx, True, [x.detach() for x in fake_leftA_feats])
                         loss_flow_warpy_inv = G_BA(leftB_forward, flow_inv_warpy, True, [x.detach() for x in fake_leftA_feats])
                         #loss_flow_warpx = G_BA(leftB, flow_warpx, True, [x.detach() for x in fake_rightA_feats])
                         #loss_flow_warpy = G_BA(leftB, flow_warpy, True, [x.detach() for x in fake_rightA_feats])
-                    loss_flow_warp_inv = loss_flow_warpx_inv+loss_flow_warpy_inv
-                    loss_flow_warp_inv = loss_flow_warp_inv.mean()
-
+                    loss_flow_warp_inv1 = loss_flow_warpx_inv+loss_flow_warpy_inv
+                    loss_flow_warp_inv += loss_flow_warp_inv1.mean()
                 else:
-                    loss_flow_warp_inv = 0
+                    loss_disp_warp_inv = 0
 
-                if args.lambda_flow_warp:
-                     # TODO 提取multi-level features from flow
-                    #new_sizes = [(128, 256), (64, 128), (32, 64)]
-                    #import pdb; pdb.set_trace()
-                    num_downsample = 3
-                    #flow_warp = downsample_optical_flow(flow_preds[-1], downsample_factor=1/2, num_downsample=num_downsample)
-                    flow_predsx = flow_preds[-1][:,0,:,:].unsqueeze(1)
-                    flow_predsy = flow_preds[-1][:,1,:,:].unsqueeze(1)
-                    flow_warpx = downsample_optical_flow(flow_predsx, downsample_factor=1/2, num_downsample=num_downsample)
-                    flow_warpy = downsample_optical_flow(flow_predsy, downsample_factor=1/2, num_downsample=num_downsample)
-                    #disp_warp = [disp_ests[i] for i in range(3)]
-                    #loss_disp_warp = G_BA_debug(leftB, disp_warp, True, [x.detach() for x in fake_rightA_feats])
-                    #import pdb; pdb.set_trace()
-                    #flow_warp = [flow_preds[i] for i in range(3)]
-                    #loss_flow_warp = warp_loss(flow_preds[-1],flowB,weigths=[1.0])
-                    #import pdb; pdb.set_trace()
-                    #这里应当是leftB_forward? 不对，warp得到的应该是预测的flow. leftB 到fake_leftA_forward_feats
-                    # leftB_forward 到fake_leftA_feats
+                if args.lambda_disp_warp:
+                    flow_warp = [flow_preds_sampled[i] for i in range(3)] # len:4 shape:[1,1,256,512],[1,1,128,256],[1,1,64,128],[1,1,32,64]
+                    flow_warpx = [flow_predsx[i] for i in range(3)] 
+                    flow_warpy = [flow_predsy[i] for i in range(3)] 
+                    # flow_predsx = flow_preds[-1][:,0,:,:].unsqueeze(1)
+                    # flow_predsy = flow_preds[-1][:,1,:,:].unsqueeze(1)
 
                     if args.debug:
                         loss_flow_warpx = G_BA_debug(leftB, flow_warpx, True, [x.detach() for x in fake_leftA_forward_feats])
@@ -938,104 +931,18 @@ def train(args):
                         loss_flow_warpx = G_BA(leftB, flow_warpx, True, [x.detach() for x in fake_leftA_forward_feats])
                         loss_flow_warpy = G_BA(leftB, flow_warpy, True, [x.detach() for x in fake_leftA_forward_feats])
                         
-                    loss_flow_warp = loss_flow_warpx+loss_flow_warpy
-                    loss_flow_warp = loss_flow_warp.mean()
+                    loss_flow_warp1 = loss_flow_warpx+loss_flow_warpy
+                    loss_flow_warp += loss_flow_warp1.mean()
                 else:
-                    loss_flow_warp = 0
+                    loss_disp_warp = 0
+                 
             else:
                 loss_flow_warp = 0
                 loss_flow_warp_inv = 0
-            # 改变思路？
-            '''
 
             
             if args.flow:
-                #import pdb; pdb.set_trace() 
-                if args.lambda_flow_warp_inv:
-                    #flow_preds: len = 4, flow_preds[0].shape = [1,2,256,512], flow_preds[1].shape = [1,2,256,512]
-                    
-                    num_downsample = 3
-                    flow_predsx = flow_preds[-1][:,0,:,:].unsqueeze(1)
-                    flow_predsy = flow_preds[-1][:,1,:,:].unsqueeze(1)
-                    #flow_inv_warpx = downsample_optical_flow(flow_predsx, downsample_factor=1/2, num_downsample=num_downsample)
-                    #flow_inv_warpy = downsample_optical_flow(flow_predsy, downsample_factor=1/2, num_downsample=num_downsample)
-                    #作反向warp
-                    # flow_inv_warpx = [-flow_inv_warpx[i] for i in range(3)]
-                    # flow_inv_warpy = [-flow_inv_warpy[i] for i in range(3)]
-                    # leftB_forward+inv_flow之后，得到warp之后的warped_leftB, 和fake_leftA的feature做loss
-                    gamma = 0.9
-                    n_predictions = len(flow_preds) 
-                    for i in range(n_predictions):
-                        i_weight = gamma ** (n_predictions - i - 1)
-                        flow_inv_warp = -flow_preds[i]  
-                        flow_inv_warpx = flow_inv_warp[:,0,:,:].unsqueeze(1)
-                        flow_inv_warpy = flow_inv_warp[:,1,:,:].unsqueeze(1)
-                        if args.debug:
-                            fake_leftA_inv_warpx,loss_flow_warpx_inv = G_BA_debug(leftB_forward, flow_inv_warpx, True, [x.detach() for x in fake_leftA_feats])
-                            fake_leftA_inv_warpy,loss_flow_warpy_inv = G_BA_debug(leftB_forward, flow_inv_warpy, True, [x.detach() for x in fake_leftA_feats])
-                        else:
-                            fake_leftA_inv_warpx,loss_flow_warpx_inv = G_BA(leftB_forward, flow_inv_warpx, True, [x.detach() for x in fake_leftA_feats])
-                            fake_leftA_inv_warpy,loss_flow_warpy_inv = G_BA(leftB_forward, flow_inv_warpy, True, [x.detach() for x in fake_leftA_feats])
-                            #loss_flow_warpx = G_BA(leftB, flow_warpx, True, [x.detach() for x in fake_rightA_feats])
-                            #loss_flow_warpy = G_BA(leftB, flow_warpy, True, [x.detach() for x in fake_rightA_feats])
-                        loss_flow_warp_inv1 = loss_flow_warpx_inv+loss_flow_warpy_inv
-                        loss_flow_warp_inv += loss_flow_warp_inv1.mean() * i_weight
-                        #print(loss_flow_warp_inv)
-
-                else:
-                    loss_flow_warp_inv = 0
-
-                if args.lambda_flow_warp:
-                     # TODO 提取multi-level features from flow
-                    '''
-                    print(len(flow_preds))
-                    print(flow_preds[-1].shape)
-                    '''
-                    #new_sizes = [(128, 256), (64, 128), (32, 64)]
-                    #import pdb; pdb.set_trace()
-                    num_downsample = 3
-                    #flow_warp = downsample_optical_flow(flow_preds[-1], downsample_factor=1/2, num_downsample=num_downsample)
-                    flow_predsx = flow_preds[-1][:,0,:,:].unsqueeze(1)
-                    flow_predsy = flow_preds[-1][:,1,:,:].unsqueeze(1)
-                    #flow_warpx = downsample_optical_flow(flow_predsx, downsample_factor=1/2, num_downsample=num_downsample)
-                    #flow_warpy = downsample_optical_flow(flow_predsy, downsample_factor=1/2, num_downsample=num_downsample)
-                    #disp_warp = [disp_ests[i] for i in range(3)]
-                    #loss_disp_warp = G_BA_debug(leftB, disp_warp, True, [x.detach() for x in fake_rightA_feats])
-                    #import pdb; pdb.set_trace()
-                    #flow_warp = [flow_preds[i] for i in range(3)]
-                    #loss_flow_warp = warp_loss(flow_preds[-1],flowB,weigths=[1.0])
-                    #import pdb; pdb.set_trace()
-                    #这里应当是leftB_forward? 不对，warp得到的应该是预测的flow. leftB 到fake_leftA_forward_feats
-                    # leftB_forward 到fake_leftA_feats
-                    gamma = 0.9
-                    n_predictions = len(flow_preds)
-                    #import pdb; pdb.set_trace()
-                    for i in range(n_predictions):
-                        i_weight = gamma ** (n_predictions - i - 1)
-                        flow_warp = flow_preds[i]  
-                        flow_warpx = flow_warp[:,0,:,:].unsqueeze(1)
-                        flow_warpy = flow_warp[:,1,:,:].unsqueeze(1) 
-
-                        if args.debug:
-                            fake_leftA_forward_warpx, loss_flow_warpx = G_BA_debug(leftB, flow_warpx, True, [x.detach() for x in fake_leftA_forward_feats])
-                            fake_leftA_forward_warpy,loss_flow_warpy = G_BA_debug(leftB, flow_warpy, True, [x.detach() for x in fake_leftA_forward_feats])
-                        else:
-                            fake_leftA_forward_warpx, loss_flow_warpx = G_BA(leftB, flow_warpx, True, [x.detach() for x in fake_leftA_forward_feats])
-                            fake_leftA_forward_warpy,loss_flow_warpy = G_BA(leftB, flow_warpy, True, [x.detach() for x in fake_leftA_forward_feats])
-                            
-                        loss_flow_warp1 = loss_flow_warpx+loss_flow_warpy
-                        loss_flow_warp += loss_flow_warp1.mean()*i_weight
-                        #print(loss_flow_warp)
-                else:
-                    loss_flow_warp = 0
-            else:
-                loss_flow_warp = 0
-                loss_flow_warp_inv = 0
-
-
-            if args.flow:
                 loss_flow_all = args.flow * loss_flow + args.lambda_flow_warp* loss_flow_warp + args.lambda_flow_warp_inv * loss_flow_warp_inv
-                #print(loss)
                 loss_flow_all.backward()
                 optimizer_flow.step()
 
@@ -1208,28 +1115,21 @@ if __name__ == '__main__':
     parser.add_argument('--perceptual', type = float, default =1 )
     parser.add_argument('--smooth_loss', type = float, default = 1)
     parser.add_argument('--left_right_consistency', type = float, default = 1)
-
+    
+    #flownet parameters
     parser.add_argument('--flow', type = float,help= 'add optical flow branch', default = 1)
-    parser.add_argument('--task', default='flow', choices=['flow', 'stereo', 'depth'], type=str)
-    parser.add_argument('--num_scales', default=1, type=int,
-                        help='feature scales: 1/8 or 1/8 + 1/4')
-    parser.add_argument('--feature_channels', default=128, type=int)
-    parser.add_argument('--upsample_factor', default=8, type=int)
-    parser.add_argument('--num_head', default=1, type=int)
-    parser.add_argument('--ffn_dim_expansion', default=4, type=int)
-    parser.add_argument('--num_transformer_layers', default=6, type=int)
-    parser.add_argument('--reg_refine', action='store_true',
-                        help='optional task-specific local regression refinement')
-    parser.add_argument('--attn_type', default='swin', type=str,
-                        help='attention function')
-    parser.add_argument('--attn_splits_list', default=[2], type=int, nargs='+',
-                        help='number of splits in attention')
-    parser.add_argument('--corr_radius_list', default=[-1], type=int, nargs='+',
-                        help='correlation radius for matching, -1 indicates global matching')
-    parser.add_argument('--prop_radius_list', default=[-1], type=int, nargs='+',
-                        help='self-attention radius for propagation, -1 indicates global attention')
-    parser.add_argument('--num_reg_refine', default=1, type=int,
-                        help='number of additional local regression refinement')
+
+    parser.add_argument('--multiscale-weights', '-w', default=[0.005,0.01,0.02,0.08,0.32], type=float, nargs=5,
+                    help='training weight for each scale, from highest resolution (flow2) to lowest (flow6)',
+                    metavar=('W2', 'W3', 'W4', 'W5', 'W6'))
+    parser.add_argument('--sparse', action='store_true',
+                    help='look for NaNs in target flow when computing EPE, avoid if flow is garantied to be dense,'
+                    'automatically seleted when choosing a KITTIdataset')
+    
+    # parser.add_argument('--arch', '-a', metavar='ARCH', default='flownets',
+    #                    choices=model_names,
+    #                    help='model architecture, overwritten if pretrained is specified: ' +
+    #                   ' | '.join(model_names))
     
     parser.add_argument('--gamma', default=0.9, type=float,
                         help='exponential weighting')

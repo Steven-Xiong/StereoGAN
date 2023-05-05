@@ -15,8 +15,8 @@ python -u train.py \
 --save_interval=5 \
 --print_freq=220 \
 --checkpoint_save_path="stereogan_checkpoints/${model_name}" \
---load_checkpoints 0 \
---load_from_mgpus_model 0 \
+--load_checkpoints 1 \
+--load_from_mgpus_model 1 \
 --writer=${model_name} \
 --use_multi_gpu=4 \
 --img_height=256 \
@@ -45,9 +45,8 @@ python -u train.py \
 --lambda_flow_warp 0 \
 --lambda_flow_warp_inv 0 \
 --debug 0 \
+--load_dispnet_path 'stereogan_checkpoints/StereoGAN_maxdisp192_cycle10_id5_corr1_ms1e-1_invwarp5_invdispwarp5_warp5_dispwarp5_imwidth512_height256_ep100_lr2e-5_gan2e-5_baseline_GMflow_lr_flow1e-4_bs4/ep75_D1_0.3266_EPE3.4075_Thres2s0.4671_Thres4s0.2470_Thres5s0.1921_epe_flow7.3194_f1_all0.2723_epe1_flow12.6176_fl_all10.3904.pth' \
+--load_gan_path 'stereogan_checkpoints/StereoGAN_maxdisp192_cycle10_id5_corr1_ms1e-1_invwarp5_invdispwarp5_warp5_dispwarp5_imwidth512_height256_ep100_lr2e-5_gan2e-5_baseline_GMflow_lr_flow1e-4_bs4/ep75_D1_0.3266_EPE3.4075_Thres2s0.4671_Thres4s0.2470_Thres5s0.1921_epe_flow7.3194_f1_all0.2723_epe1_flow12.6176_fl_all10.3904.pth' \
+--load_flownet_path 'stereogan_checkpoints/StereoGAN_maxdisp192_cycle10_id5_corr1_ms1e-1_invwarp5_invdispwarp5_warp5_dispwarp5_imwidth512_height256_ep100_lr2e-5_gan2e-5_baseline_GMflow_lr_flow1e-4_bs4/ep75_D1_0.3266_EPE3.4075_Thres2s0.4671_Thres4s0.2470_Thres5s0.1921_epe_flow7.3194_f1_all0.2723_epe1_flow12.6176_fl_all10.3904.pth' \
 2>&1 | tee ./logs/train-$model_name-$now.log &
-# --load_dispnet_path 'stereogan_checkpoints/StereoGAN_maxdisp192_cycle10_id5_corr1_ms1e-1_invwarp5_invdispwarp5_warp5_dispwarp5_imwidth512_height256_ep100_lr2e-5_gan2e-5_baseline_GMflow_lr_flow1e-4_bs4_warp5/ep96_D1_0.3493_EPE3.3567_Thres2s0.5088_Thres4s0.2520_Thres5s0.1864_epe_flow6.1169_f1_all0.2194_epe1_flow10.4742_fl_all10.3082.pth' \
-# --load_gan_path 'stereogan_checkpoints/StereoGAN_maxdisp192_cycle10_id5_corr1_ms1e-1_invwarp5_invdispwarp5_warp5_dispwarp5_imwidth512_height256_ep100_lr2e-5_gan2e-5_baseline_GMflow_lr_flow1e-4_bs4_warp5/ep96_D1_0.3493_EPE3.3567_Thres2s0.5088_Thres4s0.2520_Thres5s0.1864_epe_flow6.1169_f1_all0.2194_epe1_flow10.4742_fl_all10.3082.pth' \
-# --load_flownet_path 'stereogan_checkpoints/StereoGAN_maxdisp192_cycle10_id5_corr1_ms1e-1_invwarp5_invdispwarp5_warp5_dispwarp5_imwidth512_height256_ep100_lr2e-5_gan2e-5_baseline_GMflow_lr_flow1e-4_bs4_warp5/ep96_D1_0.3493_EPE3.3567_Thres2s0.5088_Thres4s0.2520_Thres5s0.1864_epe_flow6.1169_f1_all0.2194_epe1_flow10.4742_fl_all10.3082.pth' \
-#2>&1 | tee ./logs/train-$model_name-$now.log &
 
