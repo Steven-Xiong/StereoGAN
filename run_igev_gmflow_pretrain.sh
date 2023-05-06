@@ -6,9 +6,9 @@ model_name="driving_imwidth512_height256_ep50_IGEVlr1e-4_GMflow_lr_flow1e-4_IGEV
 python -u train_igev_gmflow_pretrain.py \
 --model_type='IGEV' \
 --source_dataset='driving' \
---batch_size=4 \
---test_batch_size=4 \
---lr_rate=1e-4 \
+--batch_size=8 \
+--test_batch_size=8 \
+--lr_rate=2e-4 \
 --lr_gan=2e-5 \
 --train_ratio_gan=3 \
 --total_epochs=51 \
@@ -23,7 +23,7 @@ python -u train_igev_gmflow_pretrain.py \
 --img_width=512 \
 --maxdisp=192 \
 --left_right_consistency=0 \
---flow=1 \
+--flow=0 \
 --num_scales 2 \
 --upsample_factor 4 \
 --attn_splits_list 2 8 \

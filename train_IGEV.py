@@ -460,16 +460,16 @@ def train(args):
             leftB = batch['leftB'].to(device)
             rightB = batch['rightB'].to(device)
             dispA = batch['dispA'].unsqueeze(1).float().to(device)
-            dispB = batch['dispB'].to(device) 
+            #dispB = batch['dispB'].to(device) 
             if args.left_right_consistency:
                 error_mapB = batch['error_mapB'].to(device)
             leftA_forward = batch['leftA_forward'].to(device)
             leftB_forward = batch['leftB_forward'].to(device)
             flowA = batch['flowA'].to(device)
-            flowB = batch['flowB'].to(device)
+            #flowB = batch['flowB'].to(device)
             if args.source_dataset == 'VKITTI2':
                 validA = batch['validA'].to(device)  #VKITTI2直接有, driving为空
-            validB = batch['validB'].to(device)
+            #validB = batch['validB'].to(device)
             out_shape = (leftA.size(0), 1, args.img_height//16, args.img_width//16)
             valid = torch.cuda.FloatTensor(np.ones(out_shape))
             fake = torch.cuda.FloatTensor(np.zeros(out_shape))

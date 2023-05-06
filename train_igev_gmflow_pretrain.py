@@ -393,7 +393,8 @@ def train(args):
                 
             # train disp net
             net.train()
-            net_flow.eval()
+            if args.flow:
+                net_flow.eval()
             if args.IGEV:
                 net.module.freeze_bn() # We keep BatchNorm frozen
             
@@ -485,15 +486,20 @@ def train(args):
             else:
                 loss_flow, metrics= 0, 0
             
-            loss_flow.backward()
+            
             if args.flow:
+                loss_flow.backward()
                 optimizer_flow.step()
 
             if i % print_freq == print_freq - 1:
-                print('epoch[{}/{}]  step[{}/{}]  loss: {} loss_flow: {}'.format(epoch, args.total_epochs, i, len(trainloader), loss.item(), loss_flow.item() ))
+
+                if args.flow:
+                    print('epoch[{}/{}]  step[{}/{}]  loss: {} loss_flow: {}'.format(epoch, args.total_epochs, i, len(trainloader), loss.item(), loss_flow.item() ))
+                else:
+                    print('epoch[{}/{}]  step[{}/{}]  loss: {} '.format(epoch, args.total_epochs, i, len(trainloader), loss.item() ))
                 train_loss_meter.update(running_loss / print_freq)
                 #writer.add_scalar('loss/trainloss avg_meter', train_loss_meter.val, train_loss_meter.count * print_freq)
-                writer.add_scalar('loss/loss_disp', loss0, train_loss_meter.count * print_freq)
+                writer.add_scalar('loss/loss_disp', loss, train_loss_meter.count * print_freq)
                 if args.flow:
                     writer.add_scalar('loss/loss_flow', loss_flow, train_loss_meter.count * print_freq)
                 
