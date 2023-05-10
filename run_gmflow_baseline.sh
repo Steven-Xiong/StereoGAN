@@ -1,7 +1,7 @@
 #!/bin/bash
 
 now=$(date +"%Y%m%d_%H%M%S")
-model_name="driving_GMflow_lr_flow1e-4_baseline"
+model_name="driving_GMflow_lr_flow1e-4_baseline_scheduler_aug"
 
 python -u train_gmflow_baseline.py \
 --model_type='IGEV' \
@@ -44,8 +44,9 @@ python -u train_gmflow_baseline.py \
 --IGEV 0 \
 --lambda_flow_warp 5 \
 --lambda_flow_warp_inv 5 \
+--num_steps 200000 \
 --debug 0 \
-2>&1 | tee ./logs/train-$model_name-$now.log &
+#2>&1 | tee ./logs/train-$model_name-$now.log &
 # --load_IGEV_path 'stereogan_checkpoints/driving_imwidth512_height256_ep50_IGEVlr1e-4_GMflow_lr_flow1e-4_IGEV_pretrain/ep24_D1_0.2091_EPE2.4866_Thres2s0.3524_Thres4s0.1386_Thres5s0.0988_epe_flow10.2232_f1_all0.4036_epe1_flow16.8891_fl_all10.5654.pth' \
 # --load_gan_path 'stereogan_checkpoints/gan_dispnet_driving/ep10.pth' \
 # --load_flownet_path 'stereogan_checkpoints/driving_imwidth512_height256_ep50_IGEVlr1e-4_GMflow_lr_flow1e-4_IGEV_pretrain/ep24_D1_0.2091_EPE2.4866_Thres2s0.3524_Thres4s0.1386_Thres5s0.0988_epe_flow10.2232_f1_all0.4036_epe1_flow16.8891_fl_all10.5654.pth' \

@@ -1,13 +1,13 @@
 #!/bin/bash
 
 now=$(date +"%Y%m%d_%H%M%S")
-model_name="driving_dispnet_maxdisp192_cycle10_id5_corr1_ms1e-1_invwarp5_invdispwarp5_warp5_dispwarp5_imwidth512_height256_ep100_IGEVlr1e-4_gan2e-5_baseline_GMflow_lr_flow1e-4_bs4_warp5_IGEV_withpretrain"
+model_name="driving_dispnet_maxdisp192_cycle10_id5_corr1_ms1e-1_invwarp5_invdispwarp5_warp5_dispwarp5_imwidth512_height256_ep100_IGEVlr1e-4_gan2e-5_baseline_GMflow_lr_flow1e-4_bs4_warp5_IGEV_withpretrain50"
 
 python -u train_IGEV.py \
 --model_type='IGEV' \
 --source_dataset='driving' \
---batch_size=4 \
---test_batch_size=4 \
+--batch_size=2 \
+--test_batch_size=2 \
 --lr_rate=1e-4 \
 --lr_gan=2e-5 \
 --train_ratio_gan=3 \
@@ -45,9 +45,9 @@ python -u train_IGEV.py \
 --lambda_flow_warp 5 \
 --lambda_flow_warp_inv 5 \
 --debug 0 \
---load_IGEV_path 'stereogan_checkpoints/driving_dispnet_maxdisp192_cycle10_id5_corr1_ms1e-1_invwarp5_invdispwarp5_warp5_dispwarp5_imwidth512_height256_ep100_IGEVlr1e-4_gan2e-5_baseline_GMflow_lr_flow1e-4_bs4_warp5_IGEV_withpretrain/ep47_D1_0.1811_EPE2.1640_Thres2s0.2925_Thres4s0.1265_Thres5s0.0934_epe_flow7.7413_f1_all0.3216_epe1_flow13.1591_fl_all10.4501.pth' \
---load_gan_path 'stereogan_checkpoints/driving_dispnet_maxdisp192_cycle10_id5_corr1_ms1e-1_invwarp5_invdispwarp5_warp5_dispwarp5_imwidth512_height256_ep100_IGEVlr1e-4_gan2e-5_baseline_GMflow_lr_flow1e-4_bs4_warp5_IGEV_withpretrain/ep47_D1_0.1811_EPE2.1640_Thres2s0.2925_Thres4s0.1265_Thres5s0.0934_epe_flow7.7413_f1_all0.3216_epe1_flow13.1591_fl_all10.4501.pth' \
---load_flownet_path 'stereogan_checkpoints/driving_dispnet_maxdisp192_cycle10_id5_corr1_ms1e-1_invwarp5_invdispwarp5_warp5_dispwarp5_imwidth512_height256_ep100_IGEVlr1e-4_gan2e-5_baseline_GMflow_lr_flow1e-4_bs4_warp5_IGEV_withpretrain/ep47_D1_0.1811_EPE2.1640_Thres2s0.2925_Thres4s0.1265_Thres5s0.0934_epe_flow7.7413_f1_all0.3216_epe1_flow13.1591_fl_all10.4501.pth' \
+--load_IGEV_path 'stereogan_checkpoints/driving_dispnet_maxdisp192_cycle10_id5_corr1_ms1e-1_invwarp5_invdispwarp5_warp5_dispwarp5_imwidth512_height256_ep100_IGEVlr1e-4_gan2e-5_baseline_GMflow_lr_flow1e-4_bs4_warp5_IGEV_withpretrain50/ep54_D1_0.1697_EPE2.2416_Thres2s0.2861_Thres4s0.1165_Thres5s0.0847_epe_flow8.2044_f1_all0.3129_epe1_flow13.8658_fl_all10.4400.pth' \
+--load_gan_path 'stereogan_checkpoints/driving_dispnet_maxdisp192_cycle10_id5_corr1_ms1e-1_invwarp5_invdispwarp5_warp5_dispwarp5_imwidth512_height256_ep100_IGEVlr1e-4_gan2e-5_baseline_GMflow_lr_flow1e-4_bs4_warp5_IGEV_withpretrain50/ep54_D1_0.1697_EPE2.2416_Thres2s0.2861_Thres4s0.1165_Thres5s0.0847_epe_flow8.2044_f1_all0.3129_epe1_flow13.8658_fl_all10.4400.pth' \
+--load_flownet_path 'stereogan_checkpoints/driving_dispnet_maxdisp192_cycle10_id5_corr1_ms1e-1_invwarp5_invdispwarp5_warp5_dispwarp5_imwidth512_height256_ep100_IGEVlr1e-4_gan2e-5_baseline_GMflow_lr_flow1e-4_bs4_warp5_IGEV_withpretrain50/ep54_D1_0.1697_EPE2.2416_Thres2s0.2861_Thres4s0.1165_Thres5s0.0847_epe_flow8.2044_f1_all0.3129_epe1_flow13.8658_fl_all10.4400.pth' \
 2>&1 | tee ./logs/train-$model_name-$now.log &
 #--load_IGEV_path 'stereogan_checkpoints/driving_dispnet_maxdisp192_cycle10_id5_corr1_ms1e-1_invwarp5_invdispwarp5_warp5_dispwarp5_imwidth512_height256_ep100_IGEVlr1e-4_gan2e-5_baseline_GMflow_lr_flow1e-4_bs4_warp5_IGEV/ep12_D1_0.2277_EPE2.6143_Thres2s0.3806_Thres4s0.1471_Thres5s0.1000_epe_flow10.8877_f1_all0.4376_epe1_flow17.8709_fl_all10.5885.pth' \
 #--load_gan_path 'stereogan_checkpoints/driving_dispnet_maxdisp192_cycle10_id5_corr1_ms1e-1_invwarp5_invdispwarp5_warp5_dispwarp5_imwidth512_height256_ep100_IGEVlr1e-4_gan2e-5_baseline_GMflow_lr_flow1e-4_bs4_warp5_IGEV/ep12_D1_0.2277_EPE2.6143_Thres2s0.3806_Thres4s0.1471_Thres5s0.1000_epe_flow10.8877_f1_all0.4376_epe1_flow17.8709_fl_all10.5885.pth' \

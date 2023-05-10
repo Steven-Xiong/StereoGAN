@@ -16,7 +16,7 @@ python -u evaluate.py \
 --print_freq=220 \
 --checkpoint_save_path="stereogan_checkpoints/${model_name}" \
 --load_checkpoints 1 \
---load_from_mgpus_model 1 \
+--load_from_mgpus_model 2 \
 --writer=${model_name} \
 --use_multi_gpu=1 \
 --img_height=256 \
@@ -45,4 +45,4 @@ python -u evaluate.py \
 --lambda_flow_warp 0 \
 --lambda_flow_warp_inv 0 \
 --debug 0 \
---load_flownet_path 'stereogan_checkpoints/driving_dispnet_maxdisp192_cycle10_id5_corr1_ms1e-1_invwarp5_invdispwarp5_warp5_dispwarp5_imwidth512_height256_ep100_IGEVlr1e-4_gan2e-5_baseline_GMflow_lr_flow1e-4_bs4_warp5_IGEV/ep31_D1_0.2750_EPE3.2113_Thres2s0.4029_Thres4s0.2056_Thres5s0.1595_epe_flow8.3880_f1_all0.3023_epe1_flow13.9648_fl_all10.4121.pth' 
+--load_flownet_path 'stereogan_checkpoints/driving_dispnet_maxdisp192_cycle10_id5_corr1_ms1e-1_invwarp5_invdispwarp5_warp5_dispwarp5_imwidth512_height256_ep100_IGEVlr1e-4_gan2e-5_baseline_GMflow_lr_flow1e-4_bs4_warp5_IGEV_withpretrain50/ep82_D1_0.1887_EPE2.2622_Thres2s0.3120_Thres4s0.1293_Thres5s0.0939_epe_flow7.2436_f1_all0.2697_epe1_flow12.3971_fl_all10.3843.pth' 

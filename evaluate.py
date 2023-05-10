@@ -16,7 +16,7 @@ from models.loss import warp_loss, model_loss0, PerceptualLoss, smooth_loss,flow
 from models.dispnet import dispnetcorr
 from models.gan_nets import GeneratorResNet,GeneratorResNet_debug, Discriminator, weights_init_normal
 from unimatch.unimatch import UniMatch
-from dataset import ImageDataset, ValJointImageDataset, ImageDataset2
+from dataset import ImageDataset, ValJointImageDataset, ImageDataset2, ValJointImageDataset2
 
 from tensorboardX import SummaryWriter
 import torchvision.utils as vutils
@@ -28,108 +28,13 @@ from consistency import apply_disparity,generate_image_left,generate_image_right
 import cv2 as cv
 #自己写的downsample
 from models.bilinear_sampler import downsample_optical_flow
-
+from utils.util import InputPadder
 #valloader, net_flow, writer,  board_save=True
-def validate_flow(model,
-                   padding_factor=8,
-                   with_speed_metric=False,
-                   average_over_pixels=True,
-                   attn_type='swin',
-                   attn_splits_list=False,
-                   corr_radius_list=False,
-                   prop_radius_list=False,
-                   num_reg_refine=1,
-                   debug=False,
-                   ):
-    """ Peform validation using the KITTI-2015 (train) split """
-    model.eval()
 
-    val_dataset = KITTI(split='training')
-    print('Number of validation image pairs: %d' % len(val_dataset))
-
-    out_list, epe_list = [], []
-    results = {}
-
-    for val_id in range(len(val_dataset)):
-        image1, image2, flow_gt, valid_gt = val_dataset[val_id]
-        image1 = image1[None].cuda()
-        image2 = image2[None].cuda()
-
-        padder = InputPadder(image1.shape, mode='kitti', padding_factor=padding_factor)
-        image1, image2 = padder.pad(image1, image2)
-
-        results_dict = model(image1, image2,
-                             attn_type=attn_type,
-                             attn_splits_list=attn_splits_list,
-                             corr_radius_list=corr_radius_list,
-                             prop_radius_list=prop_radius_list,
-                             num_reg_refine=num_reg_refine,
-                             task='flow',
-                             )
-
-        # useful when using parallel branches
-        flow_pr = results_dict['flow_preds'][-1]
-
-        flow = padder.unpad(flow_pr[0]).cpu()
-
-        epe = torch.sum((flow - flow_gt) ** 2, dim=0).sqrt()
-        mag = torch.sum(flow_gt ** 2, dim=0).sqrt()
-
-        
-        epe = epe.view(-1)
-        mag = mag.view(-1)
-        val = valid_gt.view(-1) >= 0.5
-
-        out = ((epe > 3.0) & ((epe / mag) > 0.05)).float()
-
-        if average_over_pixels:
-            epe_list.append(epe[val].cpu().numpy())
-        else:
-            epe_list.append(epe[val].mean().item())
-
-        out_list.append(out[val].cpu().numpy())
-
-        if debug:
-            if val_id > 10:
-                break
-
-    if average_over_pixels:
-        epe_list = np.concatenate(epe_list)
-    else:
-        epe_list = np.array(epe_list)
-    out_list = np.concatenate(out_list)
-
-    epe = np.mean(epe_list)
-    f1 = 100 * np.mean(out_list)
-
-    print("Validation KITTI EPE: %.3f, F1-all: %.3f" % (epe, f1))
-    results['kitti_epe'] = epe
-    results['kitti_f1'] = f1
-
-    if with_speed_metric:
-        if average_over_pixels:
-            s0_10 = np.mean(np.concatenate(s0_10_list))
-            s10_40 = np.mean(np.concatenate(s10_40_list))
-            s40plus = np.mean(np.concatenate(s40plus_list))
-        else:
-            s0_10 = s0_10_epe_sum / s0_10_valid_samples
-            s10_40 = s10_40_epe_sum / s10_40_valid_samples
-            s40plus = s40plus_epe_sum / s40plus_valid_samples
-
-        print("Validation KITTI s0_10: %.3f, s10_40: %.3f, s40+: %.3f" % (
-            s0_10,
-            s10_40,
-            s40plus))
-
-        results['kitti_s0_10'] = s0_10
-        results['kitti_s10_40'] = s10_40
-        results['kitti_s40+'] = s40plus
-
-    return results
 
 def val(args):
     writer = SummaryWriter(comment=args.writer)
-    os.makedirs(args.checkpoint_save_path, exist_ok=True)
+    #os.makedirs(args.checkpoint_save_path, exist_ok=True)
 
     argsDict = args.__dict__
     for k,v in argsDict.items():
@@ -226,6 +131,8 @@ def val(args):
     #dataset.get_item(1)
     trainloader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=16)
     valdataset = ValJointImageDataset()
+    valdataset2 = ValJointImageDataset2()
+    #valdataset2.getitem(1)
     valloader = torch.utils.data.DataLoader(valdataset, batch_size=args.test_batch_size, shuffle=False, num_workers=16)
 
     train_loss_meter = AverageMeter()
@@ -244,27 +151,39 @@ def val(args):
     with torch.no_grad():     
         net_flow.eval()
 
-        val_dataset = valdataset
+        val_dataset = valdataset2
         print('Number of validation image pairs: %d' % len(val_dataset))
 
         out_list, epe_list = [], []
         results = {}
         print(len(val_dataset))
         #import pdb; pdb.set_trace()
-        average_over_pixels=False
+        average_over_pixels= True
+        padding_factor =32
+        padding = True
         for val_id in range(len(val_dataset)):
+            #import pdb;pdb.set_trace()
             left, right, disp_gt, left_forward,flow_gt,valid_gt = val_dataset[val_id]
-            left = torch.tensor(left)
-            left_forward = torch.tensor(left_forward)
-            valid_gt = torch.tensor(valid_gt)
-            flow_gt = torch.tensor(flow_gt)
+  
+            #visualization:
+            # import cv2
+            # image1_array = np.transpose(left, (1, 2, 0)).astype(np.uint8)
+            # cv2.imwrite('image1.png', image1_array)
+            flow_gt = flow_gt.transpose(2,0,1)
+
+            left = torch.from_numpy(left).float()
+            left_forward = torch.from_numpy(left_forward).float()
+            valid_gt = torch.from_numpy(valid_gt).float()
+            flow_gt = torch.from_numpy(flow_gt).float()
+            
             image1 = left[None].cuda()
             image2 = left_forward[None].cuda()
+            #print(image1.shape, image2.shape)
             #valid_gt = valid_gt.cuda()
-
-            #padder = InputPadder(image1.shape, mode='kitti', padding_factor=padding_factor)
-            #image1, image2 = padder.pad(image1, image2)
-
+            if padding:
+                padder = InputPadder(image1.shape, mode='kitti', padding_factor=padding_factor)
+                image1, image2 = padder.pad(image1, image2)
+            #import pdb; pdb.set_trace()
             results_dict = net_flow(image1, image2,
                                  attn_type=args.attn_type,
                                  attn_splits_list=args.attn_splits_list,
@@ -273,13 +192,17 @@ def val(args):
                                  num_reg_refine=args.num_reg_refine,
                                  task='flow',
                              )
-
+            #import pdb; pdb.set_trace()
             # useful when using parallel branches
             flow_pr = results_dict['flow_preds'][-1]
-            
-            flow = flow_pr[0].cpu()
+                
+            if padding:
+                flow = padder.unpad(flow_pr[0]).cpu()
+                
+            else:
+                flow = flow_pr[0].cpu()
             #flow = padder.unpad(flow_pr[0]).cpu()
-
+            
             epe = torch.sum((flow - flow_gt) ** 2, dim=0).sqrt()
             mag = torch.sum(flow_gt ** 2, dim=0).sqrt()
 

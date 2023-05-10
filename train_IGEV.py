@@ -442,16 +442,18 @@ def train(args):
         else:
             if epoch >= int(args.lrepochs.split(':')[0]):
                 lr = lr / int(args.lrepochs.split(':')[1])
+
         #import pdb; pdb.set_trace()
-        # for param_group in optimizer.param_groups:
-        #     param_group['lr'] = lr
+        if epoch >= int(args.lrepochs.split(':')[0]):
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = param_group['lr']/(int(args.lrepochs.split(':')[1])*4)
         # add flow
         if args.flow:
             lr_flow = args.lr_flow
             if epoch >= int(args.lrepochs.split(':')[0]):
-                lr_flow = lr_flow / int(args.lrepochs.split(':')[1])
-            # for param_group in optimizer_flow.param_groups:
-            #     param_group['lr'] = lr
+                #lr_flow = lr_flow / int(args.lrepochs.split(':')[1])
+                for param_group in optimizer_flow.param_groups:
+                    param_group['lr'] = param_group['lr']/2
         #import pdb; pdb.set_trace()
         for i, batch in enumerate(trainloader):
             n_iter += 1
@@ -1008,7 +1010,7 @@ if __name__ == '__main__':
 
     # training
     parser.add_argument('--lr_rate', nargs='?', type=float, default=1e-4, help='learning rate for dispnetc')
-    parser.add_argument('--lrepochs', type=str, default='30:1', help='the epochs to  lr: the downscale rate')
+    parser.add_argument('--lrepochs', type=str, default='30:4', help='the epochs to  lr: the downscale rate')
     parser.add_argument('--lr_gan', nargs='?', type=float, default=2e-4, help='learning rate for GAN')
     parser.add_argument('--train_ratio_gan', nargs='?', type=int, default=5, help='training ratio disp:gan=5:1')
     parser.add_argument('--batch_size', nargs='?', type=int, default=6, help='batch size')

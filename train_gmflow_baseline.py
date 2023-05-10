@@ -261,11 +261,13 @@ def train(args):
         # optimizer_D_backward = optim.Adam(D_A_backward.parameters(), lr=args.lr_gan, betas=(0.5, 0.999))
     # start epoch赋初值
     start_epoch = 0
+    start_step = 0
     if args.load_checkpoints:
         print('load optimizer')
         #checkpoint = torch.load(args.load_IGEV_path,map_location = device)
         checkpoint_flow = torch.load(args.load_flownet_path,map_location = device)
-        start_epoch = checkpoint_flow['epoch']+1
+        start_epoch = checkpoint_flow['epoch']
+        start_step = checkpoint['step']
         
         if args.flow:
             optimizer_flow.load_state_dict(checkpoint_flow['optimizer_flow_state_dict'])
@@ -307,8 +309,20 @@ def train(args):
     #    val_loss_meter.update(l1_test_loss)
     #    print('Val epoch[{}/{}] loss: {}'.format(0, args.total_epochs, l1_test_loss))
 
+    last_epoch = start_step if args.load_checkpoints and start_step > 0 else -1
+    lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(
+        optimizer_flow, args.lr_flow,
+        args.num_steps + 10,
+        pct_start=0.05,
+        cycle_momentum=False,
+        anneal_strategy='cos',
+        last_epoch=last_epoch,
+    )
+    
+    total_steps = start_step
     print('begin training...')
     print('start_epoch:', start_epoch)
+    print('start_step:', start_step)
     print('total_epoch:', args.total_epochs)
     best_val_epe_flow = 1.
     best_f1_all = 100.
@@ -405,6 +419,9 @@ def train(args):
             loss_flow.backward()
             if args.flow:
                 optimizer_flow.step()
+                # add scheduler
+                lr_scheduler.step()
+            total_steps += 1
 
             if i % print_freq == print_freq - 1:
                 print('epoch[{}/{}]  step[{}/{}]  loss_flow: {}'.format(epoch, args.total_epochs, i, len(trainloader),  loss_flow.item() ))
@@ -420,7 +437,7 @@ def train(args):
         t1 = time.time()   #to do: add other evaluation metrics
         # add flow
         print('epoch:{}, epe_flow:{:.4f}, f1_all:{:.4f},epe1_flow:{:.4f}, fl_all1:{:.4f}, cost time:{} '.format(epoch, epe_flow,f1_all, epe1_flow, fl_all1, t1-t))
-        if (epoch % args.save_interval == 0) or epe_flow < best_val_d1 or best_f1_all < best_val_epe_flow:
+        if (epoch % args.save_interval == 0) or epe_flow < best_val_epe_flow or f1_all < best_f1_all:
            
             # add flow
             if args.flow:
@@ -429,6 +446,7 @@ def train(args):
             if args.flow:
                 torch.save({
                             'epoch': epoch,
+                            'step': total_steps,
                             'model_flow':net_flow.state_dict(),
                             'optimizer_flow_state_dict':optimizer_flow.state_dict(),
                             }, args.checkpoint_save_path + '/ep' + str(epoch) + '_epe_flow{:.4f}_f1_all{:.4f}_epe1_flow{:.4f}_fl_all1{:.4f}'.format(epe_flow,f1_all, epe1_flow, fl_all1) + '.pth')
@@ -452,6 +470,8 @@ if __name__ == '__main__':
     parser.add_argument('--save_interval', nargs='?', type=int, default='10')
     parser.add_argument('--model_type', nargs='?', type=str, default='dispnetc')
     parser.add_argument('--maxdisp', type=int, default=192)
+    #add
+    parser.add_argument('--num_steps', nargs='?', type=int, default='200000')
 
     # hyper params
     parser.add_argument('--lambda_cycle', type=float, default=10)

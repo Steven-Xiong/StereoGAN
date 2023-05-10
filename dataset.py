@@ -9,6 +9,7 @@ from PIL import Image
 import torchvision.transforms as transforms
 import torch
 from utils.util import read_all_lines, pfm_imread,readflow_driving,readFlowKITTI, read_vkitti2_flow
+from augmentation import FlowAugmentor, SparseFlowAugmentor
 
 def to_rgb(image):
     rgb_image = Image.new("RGB", image.size)
@@ -35,6 +36,10 @@ class ImageDataset(Dataset):
         # self.leftB_files, self.rightB_files, self.dispB_files = self.load_path('filenames/kitti15_adv.txt')
         self.leftA_files, self.rightA_files, self.dispA_files,self.leftA_forward,self.flowA = self.load_flow_path('filenames/driving_adv_flow.txt')
         self.leftB_files, self.rightB_files, self.dispB_files, self.leftB_forward,self.flowB = self.load_flow_path('filenames/kitti15_adv_flow_train.txt')
+        
+        # self.augmentorA = FlowAugmentor({'crop_size': [256, 512], 'min_scale': -0.4, 'max_scale': 0.8, 'do_flip': True})
+        # self.augmentorB = SparseFlowAugmentor({'crop_size': [256, 512], 'min_scale': -0.2, 'max_scale': 0.4, 'do_flip': False})
+        
 
     def load_path(self, list_filename):
         lines = read_all_lines(list_filename)
@@ -144,6 +149,11 @@ class ImageDataset(Dataset):
             error_mapB = error_mapB[y2:y2+crop_h, x2:x2+crop_w]
         else:
             error_mapB = []
+
+        # # augmentation:
+        # leftA, leftA_forward, flowA = self.augmentorA(leftA, leftA_forward, flowA)
+        # leftB, leftB_forward, flowB, validB = self.augmentorB(leftB, leftB_forward, flowB, validB) 
+
         # transform
         leftA = self.transform(leftA)
         rightA = self.transform(rightA)
@@ -164,8 +174,8 @@ class ImageDataset(Dataset):
 class ValJointImageDataset(Dataset):
     def __init__(self, root='data/kitti_15', transforms_=None, input_shape=(3, 384, 1280)):
         f = open('./filenames/kitti15_adv_flow_val.txt', 'r')
-        mean = [0.5, 0.5, 0.5]
-        std = [0.5, 0.5, 0.5]
+        mean = [0.485, 0.456, 0.406]
+        std = [0.229, 0.224, 0.225]
         channels, height, width = input_shape
         transforms_ = [transforms.ToTensor(),
                        transforms.Normalize(mean=mean, std=std)]
@@ -212,9 +222,9 @@ class ValJointImageDataset(Dataset):
         # add flow
         left_forward = self.load_image(self.left_forward_files[index])
         flow,valid = self.load_flowB(self.flow_files[index])  #B 返回flow和对应valid值
-
+        
         top_pad = 384 - shape[0]
-        right_pad = 1280 - shape[1]
+        right_pad = 1280 - shape[1]    #1280
         assert top_pad > 0 and right_pad > 0
         # pad disparity gt
         #print('disp.shape',disp.shape)
@@ -227,7 +237,7 @@ class ValJointImageDataset(Dataset):
         left = self.transform(left).numpy()
         right = self.transform(right).numpy()
         left_forward = self.transform(left_forward).numpy()
-
+        
         #print('left.shape',left.shape)
         #print(len(flow))
         #print('flow.shape',flow.shape)
@@ -239,6 +249,7 @@ class ValJointImageDataset(Dataset):
         left_forward = np.lib.pad(left_forward, ((0, 0), (top_pad, 0), (0, right_pad)), mode='constant', constant_values=0)
         flow = np.lib.pad(flow, ((0, 0), (top_pad, 0), (0, right_pad)), mode='constant', constant_values=0)
         valid = np.lib.pad(valid, ((top_pad, 0), (0, right_pad)), mode='constant', constant_values=0)
+        
         #disp = self.transform_disp(disp)
         #print(left.shape,right.shape, disp.shape, left_forward.shape, flow.shape, valid.shape)
         return left, right, disp, left_forward, flow, valid
@@ -390,3 +401,84 @@ class ImageDataset2(Dataset):
 
     def __len__(self):
         return len(self.leftA_files)
+    
+# for validation
+class ValJointImageDataset2(Dataset):
+    def __init__(self, root='data/kitti_15', transforms_=None, input_shape=(3, 384, 1280)):
+        f = open('./filenames/kitti15_adv_flow_val.txt', 'r')
+        mean = [0.5, 0.5, 0.5]
+        std = [0.5, 0.5, 0.5]
+        channels, height, width = input_shape
+        transforms_ = [transforms.ToTensor(),
+                       transforms.Normalize(mean=mean, std=std)]
+        self.transform = transforms.Compose(transforms_)
+        #transforms_disp = [#transforms.Resize((height, width), Image.BICUBIC),
+        #                   transforms.ToTensor()]
+        #self.transform_disp = transforms.Compose(transforms_disp)
+
+        self.left_files = []
+        self.right_files = []
+        self.disp_files = []
+        self.left_forward_files = []
+        self.flow_files = []
+        for line in f:
+            line = line.strip()
+            a, b, c ,d ,e= line.split()
+            self.left_files.append(os.path.join(root, a))
+            self.right_files.append(os.path.join(root, b))
+            self.disp_files.append(os.path.join(root, c))
+            self.left_forward_files.append(os.path.join(root,d))
+            self.flow_files.append(os.path.join(root,e))
+
+    def load_image(self, filename):
+        return Image.open(filename).convert('RGB')
+
+    def load_disp(self, filename):
+        data = Image.open(filename)
+        data = np.array(data, dtype=np.float32) / 256.
+        return data
+        
+    def load_flowB(self, filename):
+        # data = Image.open(filename)
+        # data = np.array(data, dtype=np.float32) / 256.
+        # return data
+        data,valid = readFlowKITTI(filename)
+        return data,valid
+
+    def __getitem__(self, index):
+        left = self.load_image(self.left_files[index])
+        shape = np.array(left).shape[:2]
+        right = self.load_image(self.right_files[index])
+        disp = self.load_disp(self.disp_files[index])
+        #disp = Image.fromarray(disp)
+        # add flow
+        left_forward = self.load_image(self.left_forward_files[index])
+        flow,valid = self.load_flowB(self.flow_files[index])  #B 返回flow和对应valid值
+        #import pdb; pdb.set_trace()
+        
+        # pad disparity gt
+        #print('disp.shape',disp.shape)
+        
+        left = self.transform(left).numpy()
+        right = self.transform(right).numpy()
+        left_forward = self.transform(left_forward).numpy()
+        
+        # left = left.numpy()
+        # right = right.numpy()
+        # left_forward = left_forward.numpy()
+
+        # #print('left.shape',left.shape)
+        # #print(len(flow))
+        # #print('flow.shape',flow.shape)
+        # #print('flow[1].shape',flow[1].shape)
+        # flow = np.transpose(flow,(2,0,1))
+        # #print('flow.shape',flow.shape)
+        # left = np.lib.pad(left, ((0, 0), (top_pad, 0), (0, right_pad)), mode='constant', constant_values=0)
+        # right = np.lib.pad(right, ((0, 0), (top_pad, 0), (0, right_pad)), mode='constant', constant_values=0)
+        # left_forward = np.lib.pad(left_forward, ((0, 0), (top_pad, 0), (0, right_pad)), mode='constant', constant_values=0)
+        # flow = np.lib.pad(flow, ((0, 0), (top_pad, 0), (0, right_pad)), mode='constant', constant_values=0)
+        # valid = np.lib.pad(valid, ((top_pad, 0), (0, right_pad)), mode='constant', constant_values=0)
+        return left, right, disp, left_forward, flow, valid
+
+    def __len__(self):
+        return len(self.left_files)
