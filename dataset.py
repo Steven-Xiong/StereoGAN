@@ -174,8 +174,8 @@ class ImageDataset(Dataset):
 class ValJointImageDataset(Dataset):
     def __init__(self, root='data/kitti_15', transforms_=None, input_shape=(3, 384, 1280)):
         f = open('./filenames/kitti15_adv_flow_val.txt', 'r')
-        mean = [0.485, 0.456, 0.406]
-        std = [0.229, 0.224, 0.225]
+        mean = [0.5, 0.5, 0.5]
+        std = [0.5, 0.5, 0.5]
         channels, height, width = input_shape
         transforms_ = [transforms.ToTensor(),
                        transforms.Normalize(mean=mean, std=std)]

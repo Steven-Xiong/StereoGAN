@@ -885,8 +885,8 @@ def train(args):
             else:
                 loss_smooth_main = 0
             
-            loss = loss0 + args.lambda_disp_warp*loss_disp_warp + args.lambda_disp_warp_inv*loss_disp_warp_inv + args.left_right_consistency * left_right_loss \
-                     + args.smooth_loss * loss_smooth_main 
+            loss = loss0 + args.lambda_disp_warp*loss_disp_warp + args.lambda_disp_warp_inv*loss_disp_warp_inv 
+                    
             #print(loss)
             loss.backward()
             optimizer.step()
