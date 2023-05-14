@@ -44,6 +44,8 @@ python -u train.py \
 --unimatch_stereo 0 \
 --lambda_flow_warp 0 \
 --lambda_flow_warp_inv 0 \
+--lambda_flow_warpx 5 \
+--lambda_flow_warpx_inv 5 \
 --debug 0 \
 --load_dispnet_path 'stereogan_checkpoints/StereoGAN_maxdisp192_cycle10_id5_corr1_ms1e-1_invwarp5_invdispwarp5_warp5_dispwarp5_imwidth512_height256_ep100_lr2e-5_gan2e-5_baseline_GMflow_lr_flow1e-4_bs4/ep75_D1_0.3266_EPE3.4075_Thres2s0.4671_Thres4s0.2470_Thres5s0.1921_epe_flow7.3194_f1_all0.2723_epe1_flow12.6176_fl_all10.3904.pth' \
 --load_gan_path 'stereogan_checkpoints/StereoGAN_maxdisp192_cycle10_id5_corr1_ms1e-1_invwarp5_invdispwarp5_warp5_dispwarp5_imwidth512_height256_ep100_lr2e-5_gan2e-5_baseline_GMflow_lr_flow1e-4_bs4/ep75_D1_0.3266_EPE3.4075_Thres2s0.4671_Thres4s0.2470_Thres5s0.1921_epe_flow7.3194_f1_all0.2723_epe1_flow12.6176_fl_all10.3904.pth' \

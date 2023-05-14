@@ -1,10 +1,10 @@
 #!/bin/bash
 
 now=$(date +"%Y%m%d_%H%M%S")
-model_name="gan_dispnet_driving"
+model_name="gan_driving_withflow"
 
 python -u train_gan.py \
---model_type='dispnet' \
+--model_type='GAN' \
 --source_dataset='driving' \
 --batch_size=4 \
 --lr_gan=2e-4 \
@@ -32,8 +32,10 @@ python -u train_gan.py \
 --perceptual=1 \
 --smooth_loss=0 \
 --unimatch_stereo 0 \
---lambda_flow_warp 0 \
---lambda_flow_warp_inv 0 \
+--lambda_flow_warp 5 \
+--lambda_flow_warp_inv 5 \
+--lambda_flow_warpx 5 \
+--lambda_flow_warpx_inv 5 \
 --debug 0 \
 2>&1 | tee ./logs/train-$model_name-$now.log &
 

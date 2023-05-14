@@ -248,12 +248,13 @@ def train(args):
             if args.load_IGEV_path:
                 net = load_multi_gpu_checkpoint(net, args.load_IGEV_path, 'model')
             else:
-                net.apply(weights_init_normal)
-
-            if args.load_flownet_path:
-                net_flow = load_multi_gpu_checkpoint(net_flow,args.load_flownet_path,'model_flow')
-            else:
-                net_flow.apply(weights_init_normal)
+                pass
+                #net.apply(weights_init_normal)
+            if args.flow:
+                if args.load_flownet_path:
+                    net_flow = load_multi_gpu_checkpoint(net_flow,args.load_flownet_path,'model_flow')
+                else:
+                    net_flow.apply(weights_init_normal)
             G_AB = load_multi_gpu_checkpoint(G_AB, args.load_gan_path, 'G_AB')
             G_BA = load_multi_gpu_checkpoint(G_BA, args.load_gan_path, 'G_BA')
             D_A = load_multi_gpu_checkpoint(D_A, args.load_gan_path, 'D_A')
@@ -269,10 +270,11 @@ def train(args):
                 net = load_checkpoint(net, args.load_checkpoint_path, device)
             else:
                 net.apply(weights_init_normal)
-            if args.load_flownet_path:
-                net_flow = load_checkpoint(net_flow, args.load_flownet_path, device)
-            else:
-                net_flow.apply(weights_init_normal)   #可能有问题？
+            if args.flow:
+                if args.load_flownet_path:
+                    net_flow = load_checkpoint(net_flow, args.load_flownet_path, device)
+                else:
+                    net_flow.apply(weights_init_normal)   #可能有问题？
             G_AB = load_checkpoint(G_AB, args.load_gan_path, 'G_AB')
             G_BA = load_checkpoint(G_BA, args.load_gan_path, 'G_BA')
             D_A = load_checkpoint(D_A, args.load_gan_path, 'D_A')
@@ -322,7 +324,8 @@ def train(args):
         print('load optimizer')
         checkpoint = torch.load(args.load_IGEV_path,map_location = device)
         checkpoint_gan = torch.load(args.load_gan_path,map_location = device)
-        checkpoint_flow = torch.load(args.load_flownet_path,map_location = device)
+        if args.flow:
+            checkpoint_flow = torch.load(args.load_flownet_path,map_location = device)
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         start_epoch = checkpoint['epoch']+1
         
@@ -446,14 +449,14 @@ def train(args):
         #import pdb; pdb.set_trace()
         if epoch >= int(args.lrepochs.split(':')[0]):
             for param_group in optimizer.param_groups:
-                param_group['lr'] = param_group['lr']/(int(args.lrepochs.split(':')[1])*4)
+                param_group['lr'] = param_group['lr']/(int(args.lrepochs.split(':')[1]))
         # add flow
         if args.flow:
             lr_flow = args.lr_flow
             if epoch >= int(args.lrepochs.split(':')[0]):
                 #lr_flow = lr_flow / int(args.lrepochs.split(':')[1])
                 for param_group in optimizer_flow.param_groups:
-                    param_group['lr'] = param_group['lr']/2
+                    param_group['lr'] = param_group['lr']/(int(args.lrepochs.split(':')[1]))
         #import pdb; pdb.set_trace()
         for i, batch in enumerate(trainloader):
             n_iter += 1
@@ -495,10 +498,14 @@ def train(args):
                     fake_leftA, fake_leftA_feats = G_BA(leftB, extract_feat=True) #len(fake_leftA_feats)=3
                     # shape:[0]: ([4, 256, 64, 128]),[1]: ([4, 128, 128, 256]),[2]:([4, 64, 256, 512])
                     # add forward
+                    fake_leftB_forward, fake_leftB_forward_feats = G_AB(leftA_forward, extract_feat=True)
                     fake_leftA_forward, fake_leftA_forward_feats = G_BA(leftB_forward, extract_feat=True)
                 else:
                     fake_leftB = G_AB(leftA)
                     fake_leftA = G_BA(leftB)
+                    # add forward
+                    fake_leftB_forward = G_AB(leftA_forward)
+                    fake_leftA_forward = G_BA(leftB_forward)
                 if args.lambda_warp:
                     fake_rightB, fake_rightB_feats = G_AB(rightA, extract_feat=True)
                     fake_rightA, fake_rightA_feats = G_BA(rightB, extract_feat=True)
@@ -511,8 +518,12 @@ def train(args):
 
                 if args.lambda_warp_inv:
                     rec_leftA, rec_leftA_feats = G_BA(fake_leftB, extract_feat=True)
+                    # add flow need
+                    rec_leftA_forward, rec_leftA_forward_feats = G_BA(fake_leftB_forward, extract_feat=True)
                 else:
                     rec_leftA = G_BA(fake_leftB)
+                    # add flow need
+                    rec_leftA_forward = G_BA(fake_leftB_forward)
                 if args.lambda_warp:
                     rec_rightA, rec_rightA_feats = G_BA(fake_rightB, extract_feat=True)
                 else:
@@ -572,6 +583,51 @@ def train(args):
                 else:
                     loss_warp = 0
 
+                # add flow warp loss
+                if args.flow:
+                    #import pdb; pdb.set_trace()
+                    
+                    flowA_new = flowA.permute(0,3,1,2)
+                    if args.lambda_flow_warpx_inv:
+                        
+                        flow_inv_warpx = -flowA_new[:,0,:,:].unsqueeze(1)
+                        flow_inv_warpy = -flowA_new[:,1,:,:].unsqueeze(1)
+                        fake_leftB_warpx,loss_flowwarp_inv_feats1x = G_AB(leftA_forward, flow_inv_warpx, True, [x.detach() for x in fake_leftB_feats])
+                        fake_leftB_warpy,loss_flowwarp_inv_feats1y = G_AB(leftA_forward, flow_inv_warpy, True, [x.detach() for x in fake_leftB_feats])
+                        rec_leftA_warpx, loss_flow_warp_inv_feat2x = G_BA(fake_leftB_forward, flow_inv_warpx, True, [x.detach() for x in rec_leftA_feats])
+                        rec_leftA_warpy, loss_flow_warp_inv_feat2y = G_BA(fake_leftB_forward, flow_inv_warpy, True, [x.detach() for x in rec_leftA_feats])
+                        loss_flow_warp_inv1x = warp_loss([(G_BA(fake_leftB_warpx[0]), fake_leftB_warpx[1])], [leftA], weights=[1])
+                        loss_flow_warp_inv1y = warp_loss([(G_BA(fake_leftB_warpy[0]), fake_leftB_warpy[1])], [leftA], weights=[1])
+                        loss_flow_warp_inv2x = warp_loss([rec_leftA_warpx], [leftA], weights=[1])
+                        loss_flow_warp_inv2y = warp_loss([rec_leftA_warpy], [leftA], weights=[1])
+                        
+                        loss_warp_flow_inv = (loss_flow_warp_inv1x+loss_flow_warp_inv1y)/2+(loss_flow_warp_inv2x+loss_flow_warp_inv2y)/2 \
+                                             + (loss_flowwarp_inv_feats1x.mean()+loss_flowwarp_inv_feats1y.mean()+loss_flow_warp_inv_feat2x.mean()+loss_flow_warp_inv_feat2y.mean())/2
+                    else:
+                        loss_warp_flow_inv = 0
+                    
+                    if args.lambda_flow_warpx:
+
+                        flow_inv_warpx = flowA_new[:,0,:,:].unsqueeze(1)
+                        flow_inv_warpy = flowA_new[:,1,:,:].unsqueeze(1)
+                        fake_leftB_forward_warpx,loss_flowwarp_feats1x = G_AB(leftA, flow_inv_warpx, True, [x.detach() for x in fake_leftB_forward_feats])
+                        fake_leftB_forward_warpy,loss_flowwarp_feats1y = G_AB(leftA, flow_inv_warpy, True, [x.detach() for x in fake_leftB_forward_feats])
+                        rec_leftA_forward_warpx, loss_flow_warp_feat2x = G_BA(fake_leftB, flow_inv_warpx, True, [x.detach() for x in rec_leftA_forward_feats])
+                        rec_leftA_forward_warpy, loss_flow_warp_feat2y = G_BA(fake_leftB, flow_inv_warpy, True, [x.detach() for x in rec_leftA_forward_feats])
+                        loss_flow_warp1x = warp_loss([(G_BA(fake_leftB_forward_warpx[0]), fake_leftB_forward_warpx[1])], [leftA_forward], weights=[1])
+                        loss_flow_warp1y = warp_loss([(G_BA(fake_leftB_forward_warpy[0]), fake_leftB_forward_warpy[1])], [leftA_forward], weights=[1])
+                        loss_flow_warp2x = warp_loss([rec_leftA_forward_warpx], [leftA_forward], weights=[1])
+                        loss_flow_warp2y = warp_loss([rec_leftA_forward_warpy], [leftA_forward], weights=[1])
+                        
+                        loss_warp_flow = (loss_flow_warp1x+loss_flow_warp1y)/2+(loss_flow_warp2x+loss_flow_warp2y)/2 \
+                                             + (loss_flowwarp_feats1x.mean()+loss_flowwarp_feats1y.mean()+loss_flow_warp_feat2x.mean()+loss_flow_warp_feat2y.mean())/2
+                    else:
+                        loss_warp_flow = 0
+
+                    #if args.lambda_flow_warpx:
+
+                    
+
                 # corr loss
                 if args.lambda_corr:
                     #要 extract feature: progressive refine loss
@@ -602,9 +658,16 @@ def train(args):
                     loss_corr = 0.
 
                 lambda_ms = args.lambda_ms * (args.total_epochs - epoch) / args.total_epochs
-                loss_G = loss_GAN + args.lambda_cycle*(args.alpha_ssim*loss_ssim+(1-args.alpha_ssim)*loss_cycle) + args.lambda_id*loss_id \
+                
+                if args.flow:
+                    loss_G = loss_GAN + args.lambda_cycle*(args.alpha_ssim*loss_ssim+(1-args.alpha_ssim)*loss_cycle) + args.lambda_id*loss_id \
                        + args.lambda_warp*loss_warp + args.lambda_warp_inv*loss_warp_inv + args.lambda_corr*loss_corr + lambda_ms*loss_ms \
-                       + args.cosine_similarity * loss_cosine + args.perceptual*loss_perceptual #+ args.smooth_loss * loss_smooth
+                       + args.cosine_similarity * loss_cosine + args.perceptual*loss_perceptual \
+                       + args.lambda_flow_warpx_inv *loss_warp_flow_inv + args.lambda_flow_warpx * loss_warp_flow   # add flow warpx
+                else:
+                    loss_G = loss_GAN + args.lambda_cycle*(args.alpha_ssim*loss_ssim+(1-args.alpha_ssim)*loss_cycle) + args.lambda_id*loss_id \
+                       + args.lambda_warp*loss_warp + args.lambda_warp_inv*loss_warp_inv + args.lambda_corr*loss_corr + lambda_ms*loss_ms \
+                       + args.cosine_similarity * loss_cosine + args.perceptual*loss_perceptual 
                 loss_G.backward()
                 optimizer_G.step()
                 
@@ -906,6 +969,8 @@ def train(args):
                     writer.add_scalar('loss/loss_id', loss_id, train_loss_meter.count * print_freq)
                     writer.add_scalar('loss/loss_warp', loss_warp, train_loss_meter.count * print_freq)
                     writer.add_scalar('loss/loss_warp_inv', loss_warp_inv, train_loss_meter.count * print_freq)
+                    writer.add_scalar('loss/loss_warp_flow', loss_warp_flow, train_loss_meter.count * print_freq)
+                    writer.add_scalar('loss/loss_warp_flow_inv', loss_warp_flow_inv, train_loss_meter.count * print_freq)
                     writer.add_scalar('loss/loss_corr', loss_corr, train_loss_meter.count * print_freq)
                     writer.add_scalar('loss/loss_ms', loss_ms, train_loss_meter.count * print_freq)
                     writer.add_scalar('loss/loss_D_A', loss_D_A, train_loss_meter.count * print_freq)
@@ -1010,7 +1075,7 @@ if __name__ == '__main__':
 
     # training
     parser.add_argument('--lr_rate', nargs='?', type=float, default=1e-4, help='learning rate for dispnetc')
-    parser.add_argument('--lrepochs', type=str, default='30:4', help='the epochs to  lr: the downscale rate')
+    parser.add_argument('--lrepochs', type=str, default='50:2', help='the epochs to  lr: the downscale rate')
     parser.add_argument('--lr_gan', nargs='?', type=float, default=2e-4, help='learning rate for GAN')
     parser.add_argument('--train_ratio_gan', nargs='?', type=int, default=5, help='training ratio disp:gan=5:1')
     parser.add_argument('--batch_size', nargs='?', type=int, default=6, help='batch size')
@@ -1033,6 +1098,9 @@ if __name__ == '__main__':
 
     parser.add_argument('--lambda_flow_warp', type=float,default = 0)
     parser.add_argument('--lambda_flow_warp_inv', type=float, default = 1)
+    # add flow warp x:
+    parser.add_argument('--lambda_flow_warpx', type = float, default= 0)
+    parser.add_argument('--lambda_flow_warpx_inv',type = float, default=0)
 
     # load & save checkpoints
     parser.add_argument('--load_checkpoints', nargs='?', type=int, default=0, help='load from ckp(saved by Pytorch)')

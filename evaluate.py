@@ -158,7 +158,7 @@ def val(args):
         results = {}
         print(len(val_dataset))
         #import pdb; pdb.set_trace()
-        average_over_pixels= True
+        average_over_pixels= False
         padding_factor =32
         padding = True
         for val_id in range(len(val_dataset)):

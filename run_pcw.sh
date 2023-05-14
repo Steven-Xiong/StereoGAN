@@ -44,6 +44,8 @@ python -u train_pcwnet.py \
 --pcwnet 1 \
 --lambda_flow_warp 5 \
 --lambda_flow_warp_inv 5 \
+--lambda_flow_warpx 5 \
+--lambda_flow_warpx_inv 5 \
 --debug 1 \
 #2>&1 | tee ./logs/train-$model_name-$now.log &
 

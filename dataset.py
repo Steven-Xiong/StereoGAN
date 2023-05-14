@@ -294,10 +294,7 @@ class ImageDataset2(Dataset):
         lines = read_all_lines(list_filename)
     
         splits = [line.split() for line in lines]
-        #print(len(splits))
-        # for x in splits:
-        #     print(x)
-        #print([x[0] for x in splits])
+    
         left_images = [x[0] for x in splits]
         right_images = [x[1] for x in splits]
         disp_images = [x[2] for x in splits]

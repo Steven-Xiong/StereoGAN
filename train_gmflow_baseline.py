@@ -267,7 +267,7 @@ def train(args):
         #checkpoint = torch.load(args.load_IGEV_path,map_location = device)
         checkpoint_flow = torch.load(args.load_flownet_path,map_location = device)
         start_epoch = checkpoint_flow['epoch']
-        start_step = checkpoint['step']
+        start_step = checkpoint_flow['step']
         
         if args.flow:
             optimizer_flow.load_state_dict(checkpoint_flow['optimizer_flow_state_dict'])

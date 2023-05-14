@@ -497,13 +497,19 @@ def train(args):
                 loss_id = (loss_id_A + loss_id_B) / 2
 
                 if args.lambda_warp_inv:
+                    #import pdb; pdb.set_trace()
                     fake_leftB, fake_leftB_feats = G_AB(leftA, extract_feat=True)
-                    fake_leftA, fake_leftA_feats = G_BA(leftB, extract_feat=True)
+                    fake_leftA, fake_leftA_feats = G_BA(leftB, extract_feat=True) #len(fake_leftA_feats)=3
+                    # shape:[0]: ([4, 256, 64, 128]),[1]: ([4, 128, 128, 256]),[2]:([4, 64, 256, 512])
                     # add forward
+                    fake_leftB_forward, fake_leftB_forward_feats = G_AB(leftA_forward, extract_feat=True)
                     fake_leftA_forward, fake_leftA_forward_feats = G_BA(leftB_forward, extract_feat=True)
                 else:
                     fake_leftB = G_AB(leftA)
                     fake_leftA = G_BA(leftB)
+                    # add forward
+                    fake_leftB_forward = G_AB(leftA_forward)
+                    fake_leftA_forward = G_BA(leftB_forward)
                 if args.lambda_warp:
                     fake_rightB, fake_rightB_feats = G_AB(rightA, extract_feat=True)
                     fake_rightA, fake_rightA_feats = G_BA(rightB, extract_feat=True)
@@ -516,8 +522,12 @@ def train(args):
 
                 if args.lambda_warp_inv:
                     rec_leftA, rec_leftA_feats = G_BA(fake_leftB, extract_feat=True)
+                    # add flow need
+                    rec_leftA_forward, rec_leftA_forward_feats = G_BA(fake_leftB_forward, extract_feat=True)
                 else:
                     rec_leftA = G_BA(fake_leftB)
+                    # add flow need
+                    rec_leftA_forward = G_BA(fake_leftB_forward)
                 if args.lambda_warp:
                     rec_rightA, rec_rightA_feats = G_BA(fake_rightB, extract_feat=True)
                 else:
@@ -576,6 +586,47 @@ def train(args):
                     loss_warp = loss_warp1 + loss_warp2 + loss_warp_feat1.mean() + loss_warp_feat2.mean()
                 else:
                     loss_warp = 0
+                
+                # add flow warp loss
+                if args.flow:
+                    #import pdb; pdb.set_trace()
+                    
+                    flowA_new = flowA.permute(0,3,1,2)
+                    if args.lambda_flow_warpx_inv:
+                        
+                        flow_inv_warpx = -flowA_new[:,0,:,:].unsqueeze(1)
+                        flow_inv_warpy = -flowA_new[:,1,:,:].unsqueeze(1)
+                        fake_leftB_warpx,loss_flowwarp_inv_feats1x = G_AB(leftA_forward, flow_inv_warpx, True, [x.detach() for x in fake_leftB_feats])
+                        fake_leftB_warpy,loss_flowwarp_inv_feats1y = G_AB(leftA_forward, flow_inv_warpy, True, [x.detach() for x in fake_leftB_feats])
+                        rec_leftA_warpx, loss_flow_warp_inv_feat2x = G_BA(fake_leftB_forward, flow_inv_warpx, True, [x.detach() for x in rec_leftA_feats])
+                        rec_leftA_warpy, loss_flow_warp_inv_feat2y = G_BA(fake_leftB_forward, flow_inv_warpy, True, [x.detach() for x in rec_leftA_feats])
+                        loss_flow_warp_inv1x = warp_loss([(G_BA(fake_leftB_warpx[0]), fake_leftB_warpx[1])], [leftA], weights=[1])
+                        loss_flow_warp_inv1y = warp_loss([(G_BA(fake_leftB_warpy[0]), fake_leftB_warpy[1])], [leftA], weights=[1])
+                        loss_flow_warp_inv2x = warp_loss([rec_leftA_warpx], [leftA], weights=[1])
+                        loss_flow_warp_inv2y = warp_loss([rec_leftA_warpy], [leftA], weights=[1])
+                        
+                        loss_warp_flow_inv = (loss_flow_warp_inv1x+loss_flow_warp_inv1y)/2+(loss_flow_warp_inv2x+loss_flow_warp_inv2y)/2 \
+                                             + (loss_flowwarp_inv_feats1x.mean()+loss_flowwarp_inv_feats1y.mean()+loss_flow_warp_inv_feat2x.mean()+loss_flow_warp_inv_feat2y.mean())/2
+                    else:
+                        loss_warp_flow_inv = 0
+                    
+                    if args.lambda_flow_warpx:
+
+                        flow_inv_warpx = flowA_new[:,0,:,:].unsqueeze(1)
+                        flow_inv_warpy = flowA_new[:,1,:,:].unsqueeze(1)
+                        fake_leftB_forward_warpx,loss_flowwarp_feats1x = G_AB(leftA, flow_inv_warpx, True, [x.detach() for x in fake_leftB_forward_feats])
+                        fake_leftB_forward_warpy,loss_flowwarp_feats1y = G_AB(leftA, flow_inv_warpy, True, [x.detach() for x in fake_leftB_forward_feats])
+                        rec_leftA_forward_warpx, loss_flow_warp_feat2x = G_BA(fake_leftB, flow_inv_warpx, True, [x.detach() for x in rec_leftA_forward_feats])
+                        rec_leftA_forward_warpy, loss_flow_warp_feat2y = G_BA(fake_leftB, flow_inv_warpy, True, [x.detach() for x in rec_leftA_forward_feats])
+                        loss_flow_warp1x = warp_loss([(G_BA(fake_leftB_forward_warpx[0]), fake_leftB_forward_warpx[1])], [leftA_forward], weights=[1])
+                        loss_flow_warp1y = warp_loss([(G_BA(fake_leftB_forward_warpy[0]), fake_leftB_forward_warpy[1])], [leftA_forward], weights=[1])
+                        loss_flow_warp2x = warp_loss([rec_leftA_forward_warpx], [leftA_forward], weights=[1])
+                        loss_flow_warp2y = warp_loss([rec_leftA_forward_warpy], [leftA_forward], weights=[1])
+                        
+                        loss_warp_flow = (loss_flow_warp1x+loss_flow_warp1y)/2+(loss_flow_warp2x+loss_flow_warp2y)/2 \
+                                             + (loss_flowwarp_feats1x.mean()+loss_flowwarp_feats1y.mean()+loss_flow_warp_feat2x.mean()+loss_flow_warp_feat2y.mean())/2
+                    else:
+                        loss_warp_flow = 0
 
                 # corr loss
                 if args.lambda_corr:
@@ -630,9 +681,15 @@ def train(args):
                     loss_corr = 0.
 
                 lambda_ms = args.lambda_ms * (args.total_epochs - epoch) / args.total_epochs
-                loss_G = loss_GAN + args.lambda_cycle*(args.alpha_ssim*loss_ssim+(1-args.alpha_ssim)*loss_cycle) + args.lambda_id*loss_id \
+                if args.flow:
+                    loss_G = loss_GAN + args.lambda_cycle*(args.alpha_ssim*loss_ssim+(1-args.alpha_ssim)*loss_cycle) + args.lambda_id*loss_id \
                        + args.lambda_warp*loss_warp + args.lambda_warp_inv*loss_warp_inv + args.lambda_corr*loss_corr + lambda_ms*loss_ms \
-                       + args.cosine_similarity * loss_cosine + args.perceptual*loss_perceptual #+ args.smooth_loss * loss_smooth
+                       + args.cosine_similarity * loss_cosine + args.perceptual*loss_perceptual \
+                       + args.lambda_flow_warpx_inv *loss_warp_flow_inv + args.lambda_flow_warpx * loss_warp_flow   # add flow warpx
+                else:
+                    loss_G = loss_GAN + args.lambda_cycle*(args.alpha_ssim*loss_ssim+(1-args.alpha_ssim)*loss_cycle) + args.lambda_id*loss_id \
+                       + args.lambda_warp*loss_warp + args.lambda_warp_inv*loss_warp_inv + args.lambda_corr*loss_corr + lambda_ms*loss_ms \
+                       + args.cosine_similarity * loss_cosine + args.perceptual*loss_perceptual 
                 loss_G.backward()
                 optimizer_G.step()
                 
@@ -1060,6 +1117,8 @@ def train(args):
                     writer.add_scalar('loss/loss_id', loss_id, train_loss_meter.count * print_freq)
                     writer.add_scalar('loss/loss_warp', loss_warp, train_loss_meter.count * print_freq)
                     writer.add_scalar('loss/loss_warp_inv', loss_warp_inv, train_loss_meter.count * print_freq)
+                    writer.add_scalar('loss/loss_warp_flow', loss_warp_flow, train_loss_meter.count * print_freq)
+                    writer.add_scalar('loss/loss_warp_flow_inv', loss_warp_flow_inv, train_loss_meter.count * print_freq)
                     writer.add_scalar('loss/loss_corr', loss_corr, train_loss_meter.count * print_freq)
                     writer.add_scalar('loss/loss_ms', loss_ms, train_loss_meter.count * print_freq)
                     writer.add_scalar('loss/loss_D_A', loss_D_A, train_loss_meter.count * print_freq)
@@ -1187,6 +1246,9 @@ if __name__ == '__main__':
 
     parser.add_argument('--lambda_flow_warp', type=float,default = 0)
     parser.add_argument('--lambda_flow_warp_inv', type=float, default = 1)
+    # add flow warp x:
+    parser.add_argument('--lambda_flow_warpx', type = float, default= 0)
+    parser.add_argument('--lambda_flow_warpx_inv',type = float, default=0)
 
     # load & save checkpoints
     parser.add_argument('--load_checkpoints', nargs='?', type=int, default=0, help='load from ckp(saved by Pytorch)')
