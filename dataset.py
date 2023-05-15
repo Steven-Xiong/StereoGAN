@@ -8,7 +8,7 @@ from torch.utils.data import Dataset
 from PIL import Image
 import torchvision.transforms as transforms
 import torch
-from utils.util import read_all_lines, pfm_imread,readflow_driving,readFlowKITTI, read_vkitti2_flow
+from utils.util import read_all_lines, pfm_imread,readflow_driving,readFlowKITTI, read_vkitti2_flow, read_vkitti2_disp
 from augmentation import FlowAugmentor, SparseFlowAugmentor
 
 def to_rgb(image):
@@ -34,8 +34,8 @@ class ImageDataset(Dataset):
         self.rootB_error_map = '/home/autel/xzx/CREStereo/vis_results/CREStereo/data/error_map_pfm'
         # self.leftA_files, self.rightA_files, self.dispA_files = self.load_path('filenames/driving_adv.txt')
         # self.leftB_files, self.rightB_files, self.dispB_files = self.load_path('filenames/kitti15_adv.txt')
-        self.leftA_files, self.rightA_files, self.dispA_files,self.leftA_forward,self.flowA = self.load_flow_path('filenames/driving_adv_flow.txt')
-        self.leftB_files, self.rightB_files, self.dispB_files, self.leftB_forward,self.flowB = self.load_flow_path('filenames/kitti15_adv_flow_train.txt')
+        self.leftA_files, self.rightA_files, self.dispA_files,self.leftA_forward,self.flowA = self.load_flow_path('filenames/driving_adv_flow_debug.txt')
+        self.leftB_files, self.rightB_files, self.dispB_files, self.leftB_forward,self.flowB = self.load_flow_path('filenames/kitti15_adv_flow_train_debug.txt')
         
         # self.augmentorA = FlowAugmentor({'crop_size': [256, 512], 'min_scale': -0.4, 'max_scale': 0.8, 'do_flip': True})
         # self.augmentorB = SparseFlowAugmentor({'crop_size': [256, 512], 'min_scale': -0.2, 'max_scale': 0.4, 'do_flip': False})
@@ -173,7 +173,7 @@ class ImageDataset(Dataset):
 # for validation
 class ValJointImageDataset(Dataset):
     def __init__(self, root='data/kitti_15', transforms_=None, input_shape=(3, 384, 1280)):
-        f = open('./filenames/kitti15_adv_flow_val.txt', 'r')
+        f = open('./filenames/kitti15_adv_flow_val_debug.txt', 'r')
         mean = [0.5, 0.5, 0.5]
         std = [0.5, 0.5, 0.5]
         channels, height, width = input_shape
@@ -309,11 +309,11 @@ class ImageDataset2(Dataset):
         data = Image.open(filename)
         data = np.array(data, dtype=np.float32) / 256.
         return data
-
+    # change to vkitti2 format
     def load_dispA(self, filename):
-        data, scale = pfm_imread(filename)
-        data = np.ascontiguousarray(data, dtype=np.float32)
-        return data
+        disp = read_vkitti2_disp(filename)
+        return disp
+    
     def load_flowA(self, filename):
         # data, scale = pfm_imread(filename)
         # data = np.ascontiguousarray(data, dtype=np.float32)
@@ -337,7 +337,7 @@ class ImageDataset2(Dataset):
         index2 = random.randint(0, len(self.leftB_files) - 1)
         leftA = self.load_image(os.path.join(self.rootA, self.leftA_files[index]))
         rightA = self.load_image(os.path.join(self.rootA, self.rightA_files[index]))
-        dispA = self.load_disp(os.path.join(self.rootA, self.dispA_files[index])) #读RGB
+        dispA = self.load_dispA(os.path.join(self.rootA, self.dispA_files[index])) # 改为vkitti2
         leftB = self.load_image(os.path.join(self.rootB, self.leftB_files[index2]))
         rightB = self.load_image(os.path.join(self.rootB, self.rightB_files[index2]))
         if self.left_right_consistency:

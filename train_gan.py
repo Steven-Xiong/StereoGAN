@@ -330,16 +330,16 @@ def train(args):
                     flow_inv_warpx = -flowA_new[:,0,:,:].unsqueeze(1)
                     flow_inv_warpy = -flowA_new[:,1,:,:].unsqueeze(1)
                     fake_leftB_warpx,loss_flowwarp_inv_feats1x = G_AB(leftA_forward, flow_inv_warpx, True, [x.detach() for x in fake_leftB_feats])
-                    fake_leftB_warpy,loss_flowwarp_inv_feats1y = G_AB(leftA_forward, flow_inv_warpy, True, [x.detach() for x in fake_leftB_feats])
+                    fake_leftB_warp,loss_flowwarp_inv_feats1y = G_AB(fake_leftB_warpx[0], flow_inv_warpy, True, [x.detach() for x in fake_leftB_feats])
                     rec_leftA_warpx, loss_flow_warp_inv_feat2x = G_BA(fake_leftB_forward, flow_inv_warpx, True, [x.detach() for x in rec_leftA_feats])
-                    rec_leftA_warpy, loss_flow_warp_inv_feat2y = G_BA(fake_leftB_forward, flow_inv_warpy, True, [x.detach() for x in rec_leftA_feats])
-                    loss_flow_warp_inv1x = warp_loss([(G_BA(fake_leftB_warpx[0]), fake_leftB_warpx[1])], [leftA], weights=[1])
-                    loss_flow_warp_inv1y = warp_loss([(G_BA(fake_leftB_warpy[0]), fake_leftB_warpy[1])], [leftA], weights=[1])
-                    loss_flow_warp_inv2x = warp_loss([rec_leftA_warpx], [leftA], weights=[1])
-                    loss_flow_warp_inv2y = warp_loss([rec_leftA_warpy], [leftA], weights=[1])
+                    rec_leftA_warp, loss_flow_warp_inv_feat2y = G_BA(rec_leftA_warpx[0], flow_inv_warpy, True, [x.detach() for x in rec_leftA_feats])
+                    #loss_flow_warp_inv1x = warp_loss([(G_BA(fake_leftB_warpx[0]), fake_leftB_warpx[1])], [leftA], weights=[1])
+                    loss_flow_warp_inv1y = warp_loss([(G_BA(fake_leftB_warp[0]), fake_leftB_warp[1])], [leftA], weights=[1])
+                    #loss_flow_warp_inv2x = warp_loss([rec_leftA_warpx], [leftA], weights=[1])
+                    loss_flow_warp_inv2y = warp_loss([rec_leftA_warp], [leftA], weights=[1])
                     
-                    loss_warp_flow_inv = (loss_flow_warp_inv1x+loss_flow_warp_inv1y)/2+(loss_flow_warp_inv2x+loss_flow_warp_inv2y)/2 \
-                                            + (loss_flowwarp_inv_feats1x.mean()+loss_flowwarp_inv_feats1y.mean()+loss_flow_warp_inv_feat2x.mean()+loss_flow_warp_inv_feat2y.mean())/2
+                    loss_warp_flow_inv = loss_flow_warp_inv1y/2+loss_flow_warp_inv2y/2 \
+                                            + (loss_flowwarp_inv_feats1y.mean()+loss_flow_warp_inv_feat2y.mean())/2
                 else:
                     loss_warp_flow_inv = 0
                 
@@ -348,16 +348,16 @@ def train(args):
                     flow_inv_warpx = flowA_new[:,0,:,:].unsqueeze(1)
                     flow_inv_warpy = flowA_new[:,1,:,:].unsqueeze(1)
                     fake_leftB_forward_warpx,loss_flowwarp_feats1x = G_AB(leftA, flow_inv_warpx, True, [x.detach() for x in fake_leftB_forward_feats])
-                    fake_leftB_forward_warpy,loss_flowwarp_feats1y = G_AB(leftA, flow_inv_warpy, True, [x.detach() for x in fake_leftB_forward_feats])
+                    fake_leftB_forward_warpy,loss_flowwarp_feats1y = G_AB(fake_leftB_forward_warpx[0], flow_inv_warpy, True, [x.detach() for x in fake_leftB_forward_feats])
                     rec_leftA_forward_warpx, loss_flow_warp_feat2x = G_BA(fake_leftB, flow_inv_warpx, True, [x.detach() for x in rec_leftA_forward_feats])
-                    rec_leftA_forward_warpy, loss_flow_warp_feat2y = G_BA(fake_leftB, flow_inv_warpy, True, [x.detach() for x in rec_leftA_forward_feats])
-                    loss_flow_warp1x = warp_loss([(G_BA(fake_leftB_forward_warpx[0]), fake_leftB_forward_warpx[1])], [leftA_forward], weights=[1])
+                    rec_leftA_forward_warpy, loss_flow_warp_feat2y = G_BA(rec_leftA_forward_warpx[0], flow_inv_warpy, True, [x.detach() for x in rec_leftA_forward_feats])
+                    #loss_flow_warp1x = warp_loss([(G_BA(fake_leftB_forward_warpx[0]), fake_leftB_forward_warpx[1])], [leftA_forward], weights=[1])
                     loss_flow_warp1y = warp_loss([(G_BA(fake_leftB_forward_warpy[0]), fake_leftB_forward_warpy[1])], [leftA_forward], weights=[1])
-                    loss_flow_warp2x = warp_loss([rec_leftA_forward_warpx], [leftA_forward], weights=[1])
+                    #loss_flow_warp2x = warp_loss([rec_leftA_forward_warpx], [leftA_forward], weights=[1])
                     loss_flow_warp2y = warp_loss([rec_leftA_forward_warpy], [leftA_forward], weights=[1])
                     
-                    loss_warp_flow = (loss_flow_warp1x+loss_flow_warp1y)/2+(loss_flow_warp2x+loss_flow_warp2y)/2 \
-                                            + (loss_flowwarp_feats1x.mean()+loss_flowwarp_feats1y.mean()+loss_flow_warp_feat2x.mean()+loss_flow_warp_feat2y.mean())/2
+                    loss_warp_flow = loss_flow_warp1y/2+loss_flow_warp2y/2 \
+                                            + (loss_flowwarp_feats1y.mean()+loss_flow_warp_feat2y.mean())/2
                 else:
                     loss_warp_flow = 0
 

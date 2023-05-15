@@ -120,7 +120,24 @@ def read_vkitti2_flow(filename):
     valid = (np.logical_or(invalid, ~invalid)).astype(np.float32)
 
     return out_flow, valid
-    
+
+def read_vkitti2_disp(filename):
+    # read depth
+    depth = cv2.imread(filename, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH)  # in cm
+    depth = (depth / 100).astype(np.float32)  # depth clipped to 655.35m for sky
+
+    valid = (depth > 0) & (depth < 655)  # depth clipped to 655.35m for sky
+
+    # convert to disparity
+    focal_length = 725.0087  # in pixels
+    baseline = 0.532725  # meter
+
+    disp = baseline * focal_length / depth
+
+    disp[~valid] = 0.000001  # invalid as very small value
+
+    return disp
+
 # add from unimatch
 def readFlowKITTI(filename):
     flow = cv2.imread(filename, cv2.IMREAD_ANYDEPTH | cv2.IMREAD_COLOR)

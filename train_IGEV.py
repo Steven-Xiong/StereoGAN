@@ -593,16 +593,16 @@ def train(args):
                         flow_inv_warpx = -flowA_new[:,0,:,:].unsqueeze(1)
                         flow_inv_warpy = -flowA_new[:,1,:,:].unsqueeze(1)
                         fake_leftB_warpx,loss_flowwarp_inv_feats1x = G_AB(leftA_forward, flow_inv_warpx, True, [x.detach() for x in fake_leftB_feats])
-                        fake_leftB_warpy,loss_flowwarp_inv_feats1y = G_AB(leftA_forward, flow_inv_warpy, True, [x.detach() for x in fake_leftB_feats])
+                        fake_leftB_warp,loss_flowwarp_inv_feats1y = G_AB(fake_leftB_warpx[0], flow_inv_warpy, True, [x.detach() for x in fake_leftB_feats])
                         rec_leftA_warpx, loss_flow_warp_inv_feat2x = G_BA(fake_leftB_forward, flow_inv_warpx, True, [x.detach() for x in rec_leftA_feats])
-                        rec_leftA_warpy, loss_flow_warp_inv_feat2y = G_BA(fake_leftB_forward, flow_inv_warpy, True, [x.detach() for x in rec_leftA_feats])
-                        loss_flow_warp_inv1x = warp_loss([(G_BA(fake_leftB_warpx[0]), fake_leftB_warpx[1])], [leftA], weights=[1])
-                        loss_flow_warp_inv1y = warp_loss([(G_BA(fake_leftB_warpy[0]), fake_leftB_warpy[1])], [leftA], weights=[1])
-                        loss_flow_warp_inv2x = warp_loss([rec_leftA_warpx], [leftA], weights=[1])
-                        loss_flow_warp_inv2y = warp_loss([rec_leftA_warpy], [leftA], weights=[1])
+                        rec_leftA_warp, loss_flow_warp_inv_feat2y = G_BA(rec_leftA_warpx[0], flow_inv_warpy, True, [x.detach() for x in rec_leftA_feats])
+                        #loss_flow_warp_inv1x = warp_loss([(G_BA(fake_leftB_warpx[0]), fake_leftB_warpx[1])], [leftA], weights=[1])
+                        loss_flow_warp_inv1y = warp_loss([(G_BA(fake_leftB_warp[0]), fake_leftB_warp[1])], [leftA], weights=[1])
+                        #loss_flow_warp_inv2x = warp_loss([rec_leftA_warpx], [leftA], weights=[1])
+                        loss_flow_warp_inv2y = warp_loss([rec_leftA_warp], [leftA], weights=[1])
                         
-                        loss_warp_flow_inv = (loss_flow_warp_inv1x+loss_flow_warp_inv1y)/2+(loss_flow_warp_inv2x+loss_flow_warp_inv2y)/2 \
-                                             + (loss_flowwarp_inv_feats1x.mean()+loss_flowwarp_inv_feats1y.mean()+loss_flow_warp_inv_feat2x.mean()+loss_flow_warp_inv_feat2y.mean())/2
+                        loss_warp_flow_inv = loss_flow_warp_inv1y/2+loss_flow_warp_inv2y/2 \
+                                             + (loss_flowwarp_inv_feats1y.mean()+loss_flow_warp_inv_feat2y.mean())/2
                     else:
                         loss_warp_flow_inv = 0
                     
@@ -611,16 +611,16 @@ def train(args):
                         flow_inv_warpx = flowA_new[:,0,:,:].unsqueeze(1)
                         flow_inv_warpy = flowA_new[:,1,:,:].unsqueeze(1)
                         fake_leftB_forward_warpx,loss_flowwarp_feats1x = G_AB(leftA, flow_inv_warpx, True, [x.detach() for x in fake_leftB_forward_feats])
-                        fake_leftB_forward_warpy,loss_flowwarp_feats1y = G_AB(leftA, flow_inv_warpy, True, [x.detach() for x in fake_leftB_forward_feats])
+                        fake_leftB_forward_warpy,loss_flowwarp_feats1y = G_AB(fake_leftB_forward_warpx[0], flow_inv_warpy, True, [x.detach() for x in fake_leftB_forward_feats])
                         rec_leftA_forward_warpx, loss_flow_warp_feat2x = G_BA(fake_leftB, flow_inv_warpx, True, [x.detach() for x in rec_leftA_forward_feats])
-                        rec_leftA_forward_warpy, loss_flow_warp_feat2y = G_BA(fake_leftB, flow_inv_warpy, True, [x.detach() for x in rec_leftA_forward_feats])
-                        loss_flow_warp1x = warp_loss([(G_BA(fake_leftB_forward_warpx[0]), fake_leftB_forward_warpx[1])], [leftA_forward], weights=[1])
+                        rec_leftA_forward_warpy, loss_flow_warp_feat2y = G_BA(rec_leftA_forward_warpx[0], flow_inv_warpy, True, [x.detach() for x in rec_leftA_forward_feats])
+                        #loss_flow_warp1x = warp_loss([(G_BA(fake_leftB_forward_warpx[0]), fake_leftB_forward_warpx[1])], [leftA_forward], weights=[1])
                         loss_flow_warp1y = warp_loss([(G_BA(fake_leftB_forward_warpy[0]), fake_leftB_forward_warpy[1])], [leftA_forward], weights=[1])
-                        loss_flow_warp2x = warp_loss([rec_leftA_forward_warpx], [leftA_forward], weights=[1])
+                        #loss_flow_warp2x = warp_loss([rec_leftA_forward_warpx], [leftA_forward], weights=[1])
                         loss_flow_warp2y = warp_loss([rec_leftA_forward_warpy], [leftA_forward], weights=[1])
                         
-                        loss_warp_flow = (loss_flow_warp1x+loss_flow_warp1y)/2+(loss_flow_warp2x+loss_flow_warp2y)/2 \
-                                             + (loss_flowwarp_feats1x.mean()+loss_flowwarp_feats1y.mean()+loss_flow_warp_feat2x.mean()+loss_flow_warp_feat2y.mean())/2
+                        loss_warp_flow = loss_flow_warp1y/2+loss_flow_warp2y/2 \
+                                             + (loss_flowwarp_feats1y.mean()+loss_flow_warp_feat2y.mean())/2
                     else:
                         loss_warp_flow = 0
 
@@ -763,7 +763,7 @@ def train(args):
                     loss_disp_warp = 0   
 
             else:
-                import pdb; pdb.set_trace()
+                #import pdb; pdb.set_trace()
                 disp_ests = net(G_AB(leftA), G_AB.forward(rightA))  #各种feature, len=7
         
                 # 加自己的predA_disp跟predB_disp之间的loss
@@ -883,10 +883,10 @@ def train(args):
                             fake_leftA_inv_warpy,loss_flow_warpy_inv = G_BA_debug(leftB_forward, flow_inv_warpy, True, [x.detach() for x in fake_leftA_feats])
                         else:
                             fake_leftA_inv_warpx,loss_flow_warpx_inv = G_BA(leftB_forward, flow_inv_warpx, True, [x.detach() for x in fake_leftA_feats])
-                            fake_leftA_inv_warpy,loss_flow_warpy_inv = G_BA(leftB_forward, flow_inv_warpy, True, [x.detach() for x in fake_leftA_feats])
+                            fake_leftA_inv_warpy,loss_flow_warpy_inv = G_BA(fake_leftA_inv_warpx[0], flow_inv_warpy, True, [x.detach() for x in fake_leftA_feats])
                             #loss_flow_warpx = G_BA(leftB, flow_warpx, True, [x.detach() for x in fake_rightA_feats])
                             #loss_flow_warpy = G_BA(leftB, flow_warpy, True, [x.detach() for x in fake_rightA_feats])
-                        loss_flow_warp_inv1 = loss_flow_warpx_inv+loss_flow_warpy_inv
+                        loss_flow_warp_inv1 = loss_flow_warpy_inv
                         loss_flow_warp_inv += loss_flow_warp_inv1.mean() * i_weight
                         #print(loss_flow_warp_inv)
 
@@ -929,9 +929,9 @@ def train(args):
                             fake_leftA_forward_warpy,loss_flow_warpy = G_BA_debug(leftB, flow_warpy, True, [x.detach() for x in fake_leftA_forward_feats])
                         else:
                             fake_leftA_forward_warpx, loss_flow_warpx = G_BA(leftB, flow_warpx, True, [x.detach() for x in fake_leftA_forward_feats])
-                            fake_leftA_forward_warpy,loss_flow_warpy = G_BA(leftB, flow_warpy, True, [x.detach() for x in fake_leftA_forward_feats])
+                            fake_leftA_forward_warpy,loss_flow_warpy = G_BA(fake_leftA_forward_warpx[0], flow_warpx, True, [x.detach() for x in fake_leftA_forward_feats])
                             
-                        loss_flow_warp1 = loss_flow_warpx+loss_flow_warpy
+                        loss_flow_warp1 = loss_flow_warpy
                         loss_flow_warp += loss_flow_warp1.mean()*i_weight
                         #print(loss_flow_warp)
                 else:
@@ -1075,7 +1075,7 @@ if __name__ == '__main__':
 
     # training
     parser.add_argument('--lr_rate', nargs='?', type=float, default=1e-4, help='learning rate for dispnetc')
-    parser.add_argument('--lrepochs', type=str, default='50:2', help='the epochs to  lr: the downscale rate')
+    parser.add_argument('--lrepochs', type=str, default='40:2', help='the epochs to  lr: the downscale rate')
     parser.add_argument('--lr_gan', nargs='?', type=float, default=2e-4, help='learning rate for GAN')
     parser.add_argument('--train_ratio_gan', nargs='?', type=int, default=5, help='training ratio disp:gan=5:1')
     parser.add_argument('--batch_size', nargs='?', type=int, default=6, help='batch size')

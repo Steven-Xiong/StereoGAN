@@ -1,15 +1,15 @@
 #!/bin/bash
 
 now=$(date +"%Y%m%d_%H%M%S")
-model_name="gan_driving_withflow"
+model_name="gan_VKITTI2_withflow_fix"
 
 python -u train_gan.py \
 --model_type='GAN' \
---source_dataset='driving' \
+--source_dataset='VKITTI2' \
 --batch_size=4 \
 --lr_gan=2e-4 \
 --train_ratio_gan=3 \
---total_epochs=11 \
+--total_epochs=21 \
 --save_interval=5 \
 --print_freq=220 \
 --checkpoint_save_path="stereogan_checkpoints/${model_name}" \

@@ -296,7 +296,7 @@ class GeneratorResNet_debug(nn.Module):
     def forward(self, x, offset=None, extract_feat=False, feat_gt=None, zx=False, zx_relax=None):
         num, _, height, width = x.size()  #[2,3,256,512] 2是gpu num
         #print(x.size())
-        #import pdb; pdb.set_trace()
+        import pdb; pdb.set_trace()
         x = self.model(x)  #[1,256,64,128] 1是gpu num
         x1 = self.up1(x)   #[1,128,128,256]
         x2 = self.up2(x1)  #[1,64,256,512]
@@ -318,7 +318,7 @@ class GeneratorResNet_debug(nn.Module):
                 raise "Non-supportive relax"
             return loss_lz
         if offset is not None:
-            #import pdb; pdb.set_trace()
+            import pdb; pdb.set_trace()
             if extract_feat:
                 if len(offset) == 3: #对应flow_warp
                     y = bilinear_sampler(x, offset[-1], 'zeros')    # x.shape: [2,256,64,128] offset[-1].shape:[2,1,64,128]
@@ -340,7 +340,7 @@ class GeneratorResNet_debug(nn.Module):
                     # return bilinear_sampler(self.out_layer(x2), offset, 'zeros'), loss_warp
                     # else:
                     loss_warp = warp_loss([y, y1, y2], feat_gt, weights=[0.5,0.5,0.7])
-                    return bilinear_sampler(self.out_layer(x2), offset, 'zeros'), loss_warp
+                    return bilinear_sampler(self.out_layer(x2), offset, 'zeros'), loss_warp  # warpx在这里
                 return bilinear_sampler(self.out_layer(x2), offset, 'zeros'), [y, y1, y2]
             return bilinear_sampler(self.out_layer(x2), offset, 'zeros')
         if extract_feat:

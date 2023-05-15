@@ -84,7 +84,7 @@ def bilinear_sampler(image, offset, mode='border'):
     #for i in range(bs):
     #    new_imgs.append(F.grid_sample(image[[i]], grid[[i]], padding_mode=mode))
     #return torch.cat([new_img, 0])
-    return (F.grid_sample(image, grid, padding_mode=mode), mask.squeeze(1))
+    return (F.grid_sample(image, grid, padding_mode=mode), mask.squeeze(1)) #有mask返回
 
 class BilinearSampler(nn.Module):
     def __init__(self):

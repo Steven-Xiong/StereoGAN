@@ -45,4 +45,4 @@ python -u evaluate.py \
 --lambda_flow_warp 0 \
 --lambda_flow_warp_inv 0 \
 --debug 0 \
---load_flownet_path '/home/x.zhexiao/StereoGAN/stereogan_checkpoints/driving_IGEV_maxdisp192_cycle10_id5_corr1_ms1e-1_invwarp5_invdispwarp5_warp5_dispwarp5_imwidth512_height256_ep100_IGEVlr1e-4_gan2e-5_baseline_GMflow_lr_flow1e-4_bs4_warp5_IGEV_withpretrain50_no_flowarp_5.11/ep100_D1_0.1472_EPE2.0060_Thres2s0.2632_Thres4s0.0991_Thres5s0.0720_epe_flow9.3976_f1_all0.3556_epe1_flow15.7390_fl_all10.4932.pth' 
+--load_flownet_path '/home/x.zhexiao/StereoGAN/stereogan_checkpoints/driving_dispnet_maxdisp192_cycle10_id5_corr1_ms1e-1_invwarp5_invdispwarp5_warp5_dispwarp5_imwidth512_height256_ep100_IGEVlr1e-4_gan2e-5_baseline_GMflow_lr_flow1e-4_bs4_warp5_IGEV_withpretrain/ep45_D1_0.2072_EPE2.5656_Thres2s0.3290_Thres4s0.1457_Thres5s0.1051_epe_flow6.2230_f1_all0.2728_epe1_flow10.6376_fl_all10.3946.pth' 
