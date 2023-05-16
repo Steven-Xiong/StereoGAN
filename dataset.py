@@ -34,8 +34,8 @@ class ImageDataset(Dataset):
         self.rootB_error_map = '/home/autel/xzx/CREStereo/vis_results/CREStereo/data/error_map_pfm'
         # self.leftA_files, self.rightA_files, self.dispA_files = self.load_path('filenames/driving_adv.txt')
         # self.leftB_files, self.rightB_files, self.dispB_files = self.load_path('filenames/kitti15_adv.txt')
-        self.leftA_files, self.rightA_files, self.dispA_files,self.leftA_forward,self.flowA = self.load_flow_path('filenames/driving_adv_flow_debug.txt')
-        self.leftB_files, self.rightB_files, self.dispB_files, self.leftB_forward,self.flowB = self.load_flow_path('filenames/kitti15_adv_flow_train_debug.txt')
+        self.leftA_files, self.rightA_files, self.dispA_files,self.leftA_forward,self.flowA = self.load_flow_path('filenames/driving_adv_flow.txt')
+        self.leftB_files, self.rightB_files, self.dispB_files, self.leftB_forward,self.flowB = self.load_flow_path('filenames/kitti15_adv_flow_train.txt')
         
         # self.augmentorA = FlowAugmentor({'crop_size': [256, 512], 'min_scale': -0.4, 'max_scale': 0.8, 'do_flip': True})
         # self.augmentorB = SparseFlowAugmentor({'crop_size': [256, 512], 'min_scale': -0.2, 'max_scale': 0.4, 'do_flip': False})
@@ -173,7 +173,7 @@ class ImageDataset(Dataset):
 # for validation
 class ValJointImageDataset(Dataset):
     def __init__(self, root='data/kitti_15', transforms_=None, input_shape=(3, 384, 1280)):
-        f = open('./filenames/kitti15_adv_flow_val_debug.txt', 'r')
+        f = open('./filenames/kitti15_adv_flow_val.txt', 'r')
         mean = [0.5, 0.5, 0.5]
         std = [0.5, 0.5, 0.5]
         channels, height, width = input_shape
