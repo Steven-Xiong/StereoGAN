@@ -1,11 +1,11 @@
 #!/bin/bash
 
 now=$(date +"%Y%m%d_%H%M%S")
-model_name="evaluate_gmflow"
+model_name="evaluate_stereo"
 
-python -u evaluate.py \
+python -u vis.py \
 --model_type='dispnet' \
---source_dataset='driving' \
+--source_dataset='VKITTI2' \
 --batch_size=4 \
 --test_batch_size=4 \
 --lr_rate=2e-5 \
@@ -34,7 +34,7 @@ python -u evaluate.py \
 --perceptual=1 \
 --smooth_loss=0 \
 --left_right_consistency=0 \
---flow=1 \
+--flow=0 \
 --num_scales 2 \
 --upsample_factor 4 \
 --attn_splits_list 2 8 \
@@ -45,4 +45,5 @@ python -u evaluate.py \
 --lambda_flow_warp 0 \
 --lambda_flow_warp_inv 0 \
 --debug 0 \
---load_flownet_path '/home/x.zhexiao/StereoGAN/stereogan_checkpoints/ep70_D1_0.1089_EPE1.6608_Thres2s0.1937_Thres4s0.0747_Thres5s0.0559_epe_flow5.4063_f1_all0.2280_epe1_flow9.2990_fl_all10.3364.pth' 
+--IGEV 1 \
+--load_IGEV_path 'stereogan_checkpoints/VKITTI2_ep80_IGEVlr2e-4_IGEV_pretrain/ep34_D1_0.0335_EPE0.9421_Thres2s0.0706_Thres4s0.0245_Thres5s0.0198.pth' 

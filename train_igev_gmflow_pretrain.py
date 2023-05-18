@@ -278,11 +278,14 @@ def train(args):
         # optimizer_D_backward = optim.Adam(D_A_backward.parameters(), lr=args.lr_gan, betas=(0.5, 0.999))
     # start epoch赋初值
     start_epoch = 0
+    start_step=0
+
     if args.load_checkpoints:
         print('load optimizer')
         checkpoint = torch.load(args.load_IGEV_path,map_location = device)
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         start_epoch = checkpoint['epoch']+1
+        start_step = checkpoint['step']
         
         for state in optimizer.state.values():
             for k, v in state.items():
@@ -303,6 +306,11 @@ def train(args):
         if args.flow:
             net_flow = nn.DataParallel(net_flow, device_ids=list(range(args.use_multi_gpu)))
             
+    #add scheduler：
+    last_epoch = start_step if args.load_checkpoints and start_step > 0 else -1
+    scheduler = optim.lr_scheduler.OneCycleLR(optimizer, args.lr_rate, args.num_steps+100,
+            pct_start=0.01, cycle_momentum=False, anneal_strategy='linear',last_epoch=last_epoch)
+    total_steps = start_step
 
     net.to(device)
     if args.flow:
@@ -340,6 +348,7 @@ def train(args):
 
     print('begin training...')
     print('start_epoch:', start_epoch)
+    print('start_step:', start_step)
     print('total_epoch:', args.total_epochs)
     best_val_d1 = 1.
     best_val_epe = 100.
@@ -435,10 +444,11 @@ def train(args):
                 #import pdb; pdb.set_trace()
                 loss0 = model_loss0(disp_ests, dispA, mask)
 
-                
+            total_steps +=1
             loss = loss0
             loss.backward()
             optimizer.step()
+            scheduler.step()
             # add optical flow: flow的image输入输出是否和stereo matching 任务一样？
 
             #left_A_forward用下一帧的右图生成
@@ -524,6 +534,7 @@ def train(args):
             if args.flow:
                 torch.save({
                             'epoch': epoch,
+                            'step': total_steps,
                             'model': net.state_dict(),
                             'model_flow':net_flow.state_dict(),
                             'optimizer_state_dict': optimizer.state_dict(),
@@ -534,6 +545,7 @@ def train(args):
             else:
                 torch.save({
                         'epoch': epoch,
+                        'step': total_steps,
                         'model': net.state_dict(),
                         'optimizer_state_dict': optimizer.state_dict(),
                         }, args.checkpoint_save_path + '/ep' + str(epoch) + '_D1_{:.4f}_EPE{:.4f}_Thres2s{:.4f}_Thres4s{:.4f}_Thres5s{:.4f}'.format(D1, EPE,Thres1s,Thres2s,Thres3s) + '.pth')
@@ -556,6 +568,8 @@ if __name__ == '__main__':
     parser.add_argument('--save_interval', nargs='?', type=int, default='10')
     parser.add_argument('--model_type', nargs='?', type=str, default='dispnetc')
     parser.add_argument('--maxdisp', type=int, default=192)
+    # add steps:
+    parser.add_argument('--num_steps', type = int, default=200000)
 
     # hyper params
     parser.add_argument('--lambda_cycle', type=float, default=10)

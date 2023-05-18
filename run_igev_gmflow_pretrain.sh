@@ -1,19 +1,19 @@
 #!/bin/bash
 
 now=$(date +"%Y%m%d_%H%M%S")
-model_name="driving_imwidth512_height256_ep50_IGEVlr1e-4_GMflow_lr_flow1e-4_IGEV_pretrain"
+model_name="VKITTI2_ep80_IGEVlr2e-4_IGEV_pretrain"
 
 python -u train_igev_gmflow_pretrain.py \
 --model_type='IGEV' \
---source_dataset='driving' \
+--source_dataset='VKITTI2' \
 --batch_size=8 \
 --test_batch_size=8 \
 --lr_rate=2e-4 \
 --lr_gan=2e-5 \
 --train_ratio_gan=3 \
---total_epochs=51 \
+--total_epochs=81 \
 --save_interval=5 \
---print_freq=220 \
+--print_freq=200 \
 --checkpoint_save_path="stereogan_checkpoints/${model_name}" \
 --load_checkpoints 0 \
 --load_from_mgpus_model 0 \
@@ -29,7 +29,7 @@ python -u train_igev_gmflow_pretrain.py \
 --attn_splits_list 2 8 \
 --corr_radius_list -1 4 \
 --prop_radius_list -1 1 \
---lr_flow=1e-4 \
+--lr_flow=2e-4 \
 --IGEV 1 \
 --lambda_flow_warp 0 \
 --lambda_flow_warp_inv 0 \

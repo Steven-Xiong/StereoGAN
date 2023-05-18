@@ -1,15 +1,15 @@
 #!/bin/bash
 
 now=$(date +"%Y%m%d_%H%M%S")
-model_name="StereoGAN_maxdisp192_cycle10_id5_corr1_ms1e-1_invwarp5_invdispwarp5_warp5_dispwarp5_imwidth512_height256_ep100_lr2e-5_gan2e-5_baseline_GMflow_lr_flow1e-4_bs4"
+model_name="VKITTI2_baseline_GMflow_lr_flow1e-4_bs4_from30"
 
 python -u train.py \
 --model_type='dispnet' \
 --source_dataset='driving' \
 --batch_size=4 \
 --test_batch_size=4 \
---lr_rate=2e-5 \
---lr_gan=2e-5 \
+--lr_rate=2e-4 \
+--lr_gan=2e-4 \
 --train_ratio_gan=3 \
 --total_epochs=101 \
 --save_interval=5 \
@@ -18,7 +18,7 @@ python -u train.py \
 --load_checkpoints 1 \
 --load_from_mgpus_model 1 \
 --writer=${model_name} \
---use_multi_gpu=4 \
+--use_multi_gpu=2 \
 --img_height=256 \
 --img_width=512 \
 --maxdisp=192 \
@@ -42,13 +42,13 @@ python -u train.py \
 --prop_radius_list -1 1 \
 --lr_flow 1e-4 \
 --unimatch_stereo 0 \
---lambda_flow_warp 0 \
---lambda_flow_warp_inv 0 \
+--lambda_flow_warp 5 \
+--lambda_flow_warp_inv 5 \
 --lambda_flow_warpx 5 \
 --lambda_flow_warpx_inv 5 \
 --debug 0 \
---load_dispnet_path 'stereogan_checkpoints/StereoGAN_maxdisp192_cycle10_id5_corr1_ms1e-1_invwarp5_invdispwarp5_warp5_dispwarp5_imwidth512_height256_ep100_lr2e-5_gan2e-5_baseline_GMflow_lr_flow1e-4_bs4/ep75_D1_0.3266_EPE3.4075_Thres2s0.4671_Thres4s0.2470_Thres5s0.1921_epe_flow7.3194_f1_all0.2723_epe1_flow12.6176_fl_all10.3904.pth' \
---load_gan_path 'stereogan_checkpoints/StereoGAN_maxdisp192_cycle10_id5_corr1_ms1e-1_invwarp5_invdispwarp5_warp5_dispwarp5_imwidth512_height256_ep100_lr2e-5_gan2e-5_baseline_GMflow_lr_flow1e-4_bs4/ep75_D1_0.3266_EPE3.4075_Thres2s0.4671_Thres4s0.2470_Thres5s0.1921_epe_flow7.3194_f1_all0.2723_epe1_flow12.6176_fl_all10.3904.pth' \
---load_flownet_path 'stereogan_checkpoints/StereoGAN_maxdisp192_cycle10_id5_corr1_ms1e-1_invwarp5_invdispwarp5_warp5_dispwarp5_imwidth512_height256_ep100_lr2e-5_gan2e-5_baseline_GMflow_lr_flow1e-4_bs4/ep75_D1_0.3266_EPE3.4075_Thres2s0.4671_Thres4s0.2470_Thres5s0.1921_epe_flow7.3194_f1_all0.2723_epe1_flow12.6176_fl_all10.3904.pth' \
+--load_dispnet_path 'stereogan_checkpoints/VKITTI2_dispnet_pretrain/ep30_D1_0.0730_EPE1.3199_Thres2s0.1431_Thres4s0.0500_Thres5s0.0373.pth' \
+--load_gan_path 'stereogan_checkpoints/gan_VKITTI2_withflow_fix/ep10.pth' \
+--load_flownet_path 'stereogan_checkpoints/VKITTI2_GMflow_pretrain/ep29_epe_flow3.6163_f1_all0.1484_epe1_flow6.0657_fl_all10.2181.pth' \
 2>&1 | tee ./logs/train-$model_name-$now.log &
 

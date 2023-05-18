@@ -461,7 +461,7 @@ if __name__ == '__main__':
 
     # training
     parser.add_argument('--lr_rate', nargs='?', type=float, default=1e-4, help='learning rate for dispnetc')
-    parser.add_argument('--lrepochs', type=str, default='30:1', help='the epochs to  lr: the downscale rate')
+    parser.add_argument('--lrepochs', type=str, default='30:4', help='the epochs to  lr: the downscale rate')
     parser.add_argument('--lr_gan', nargs='?', type=float, default=2e-4, help='learning rate for GAN')
     parser.add_argument('--train_ratio_gan', nargs='?', type=int, default=5, help='training ratio disp:gan=5:1')
     parser.add_argument('--batch_size', nargs='?', type=int, default=6, help='batch size')

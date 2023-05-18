@@ -31,7 +31,10 @@ from models.bilinear_sampler import downsample_optical_flow
 from utils.util import InputPadder
 from utils.flow_viz import save_vis_flow_tofile
 #valloader, net_flow, writer,  board_save=True
-
+from IGEV.igev_stereo import IGEVStereo
+from skimage import io
+import skimage.io
+import cv2
 
 def val(args):
     writer = SummaryWriter(comment=args.writer)
@@ -51,6 +54,11 @@ def val(args):
     # IPython.embed()
     input_shape = (3, args.img_height, args.img_width)
     
+    if args.IGEV:
+        net = IGEVStereo(args)
+    else:                 
+        net = dispnetcorr(args.maxdisp)
+
     # add optical flow module
     if args.flow:
         net_flow = UniMatch(feature_channels=args.feature_channels,
@@ -65,53 +73,69 @@ def val(args):
     
     if args.load_checkpoints:
         if args.load_from_mgpus_model:
-
-            if args.load_flownet_path:
-                net_flow = load_multi_gpu_checkpoint(net_flow,args.load_flownet_path,'model_flow')
+            if args.load_IGEV_path:
+                net = load_multi_gpu_checkpoint(net, args.load_IGEV_path, 'model')
             else:
-                net_flow.apply(weights_init_normal)
+                net.apply(weights_init_normal)
+            # if args.load_flownet_path:
+            #     net_flow = load_multi_gpu_checkpoint(net_flow,args.load_flownet_path,'model_flow')
+            # else:
+            #     net_flow.apply(weights_init_normal)
             
         else:
-            
-            if args.load_flownet_path:
-                net_flow = load_checkpoint(net_flow, args.load_flownet_path, device)
+            if args.load_IGEV_path:
+                net = load_checkpoint(net, args.load_checkpoint_path, device)
             else:
-                net_flow.apply(weights_init_normal)   #可能有问题？
+                net.apply(weights_init_normal)
+            # if args.load_flownet_path:
+            #     net_flow = load_checkpoint(net_flow, args.load_flownet_path, device)
+            # else:
+            #     net_flow.apply(weights_init_normal)   #可能有问题？
             
 
     # optimizer = optim.SGD(params, momentum=0.9)
     #加载optimizer的
 
-    
-    if args.flow:
-        #optimizer_flow = optim.Adam(net_flow.parameters(), lr=args.lr_flow, betas=(0.9, 0.999))
-        optimizer_flow = optim.AdamW(net_flow.parameters(),lr=args.lr_flow,weight_decay = args.weight_decay)
+    # if args.IGEV:
+    #     optimizer = optim.AdamW(net.parameters(), lr=args.lr_rate,  #调一样不要整混
+    #                             weight_decay=args.weight_decay_IGEV, eps=1e-8)
+    # else:
+    #     optimizer = optim.Adam(net.parameters(), lr=args.lr_rate, betas=(0.9, 0.999))
+    # if args.flow:
+    #     #optimizer_flow = optim.Adam(net_flow.parameters(), lr=args.lr_flow, betas=(0.9, 0.999))
+    #     optimizer_flow = optim.AdamW(net_flow.parameters(),lr=args.lr_flow,weight_decay = args.weight_decay)
         
     # start epoch赋初值
     start_epoch = 0
     if args.load_checkpoints:
         print('load optimizer')
-        checkpoint = torch.load(args.load_flownet_path,map_location = device)
+        checkpoint = torch.load(args.load_IGEV_path,map_location = device)
+        #optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         start_epoch = checkpoint['epoch']+1
+        start_step = checkpoint['step']
         
+        # for state in optimizer.state.values():
+        #     for k, v in state.items():
+        #         if torch.is_tensor(v):
+        #             state[k] = v.cuda()
         
-        if args.flow:
-            optimizer_flow.load_state_dict(checkpoint['optimizer_flow_state_dict'])
-            for state in optimizer_flow.state.values():
-                for k, v in state.items():
-                    if torch.is_tensor(v):
-                        state[k] = v.cuda()
-
+        # if args.flow:
+        #     optimizer_flow.load_state_dict(checkpoint['optimizer_flow_state_dict'])
+        #     for state in optimizer_flow.state.values():
+        #         for k, v in state.items():
+        #             if torch.is_tensor(v):
+        #                 state[k] = v.cuda()
 
     
     if args.use_multi_gpu:
         print("Let's use", torch.cuda.device_count(), "GPUs!")
+        net = nn.DataParallel(net, device_ids=list(range(args.use_multi_gpu)))
         
-        if args.flow:
-            net_flow = nn.DataParallel(net_flow, device_ids=list(range(args.use_multi_gpu)))
-            
-    if args.flow:
-        net_flow.to(device)
+    #     if args.flow:
+    #         net_flow = nn.DataParallel(net_flow, device_ids=list(range(args.use_multi_gpu)))
+    net.to(device)
+    # if args.flow:
+    #     net_flow.to(device)
         
 
     criterion_GAN = torch.nn.MSELoss().cuda()
@@ -150,7 +174,7 @@ def val(args):
     
     # TODO: 加 optical flow的evaluation metrics,看能不能相互促进
     with torch.no_grad():     
-        net_flow.eval()
+        net.eval()
 
         val_dataset = valdataset2
         print('Number of validation image pairs: %d' % len(val_dataset))
@@ -174,84 +198,49 @@ def val(args):
 
             left = torch.from_numpy(left).float()
             left_forward = torch.from_numpy(left_forward).float()
+            right = torch.from_numpy(right).float()
             valid_gt = torch.from_numpy(valid_gt).float()
             flow_gt = torch.from_numpy(flow_gt).float()
             
             image1 = left[None].cuda()
-            image2 = left_forward[None].cuda()
+            image2 = right[None].cuda()
             #print(image1.shape, image2.shape)
             #valid_gt = valid_gt.cuda()
             if padding:
                 padder = InputPadder(image1.shape, mode='kitti', padding_factor=padding_factor)
                 image1, image2 = padder.pad(image1, image2)
             #import pdb; pdb.set_trace()
-            results_dict = net_flow(image1, image2,
-                                 attn_type=args.attn_type,
-                                 attn_splits_list=args.attn_splits_list,
-                                 corr_radius_list=args.corr_radius_list,
-                                 prop_radius_list=args.prop_radius_list,
-                                 num_reg_refine=args.num_reg_refine,
-                                 task='flow',
-                             )
-            #import pdb; pdb.set_trace()
-            # useful when using parallel branches
-            flow_pr = results_dict['flow_preds'][-1]
+            if args.IGEV:
+                disp_est = net(image1, image2, iters=args.valid_iters, test_mode=True)
+            
+            #flow_pr = results_dict['flow_preds'][-1]
                 
             if padding:
-                flow = padder.unpad(flow_pr[0]).cpu()
+                disp_est = padder.unpad(disp_est).cpu()
                 
             else:
-                flow = flow_pr[0].cpu()
+                disp_est = disp_est[0].cpu()
             #flow = padder.unpad(flow_pr[0]).cpu()
             
-            epe = torch.sum((flow - flow_gt) ** 2, dim=0).sqrt()
-            mag = torch.sum(flow_gt ** 2, dim=0).sqrt()
-
-            
-            epe = epe.view(-1)
-            mag = mag.view(-1)
-            val = valid_gt.view(-1) >= 0.5
-
-            out = ((epe > 3.0) & ((epe / mag) > 0.05)).float()
-
-            if average_over_pixels:
-                epe_list.append(epe[val].cpu().numpy())
-            else:
-                epe_list.append(epe[val].mean().item())
-
-            out_list.append(out[val].cpu().numpy())
-
-            # if debug:
-            #     if val_id > 10:
-            #         break
-            # add visualization:
             if args.visualization:
                 #import pdb; pdb.set_trace()
                 frame_id = str(val_id) +'.png'
-                flow = padder.unpad(flow_pr[0]).permute(1, 2, 0).cpu().numpy()
+                #flow = padder.unpad(flow_pr[0]).permute(1, 2, 0).cpu().numpy()
                 output_filename = os.path.join(args.output_path, frame_id)
-                vis_flow_file = output_filename
-                save_vis_flow_tofile(flow, vis_flow_file)
+                disp = disp_est.cpu().numpy().squeeze()
+                #import pdb; pdb.set_trace()
+                disp[disp<0]=0.0
+                disp = np.round(disp * 256).astype(np.uint16)
+                
 
-        if average_over_pixels:
-            epe_list = np.concatenate(epe_list)
-        else:
-            epe_list = np.array(epe_list)
-        out_list = np.concatenate(out_list)
+                #disp = cv2.resize(pred, (in_w, in_h), interpolation=cv2.INTER_LINEAR) * t
 
-        epe = np.mean(epe_list)
-        f1 = 100 * np.mean(out_list)
+                disp_vis = (disp - disp.min()) / (disp.max() - disp.min()) * 255.0
+                disp_vis = disp_vis.astype("uint8")
+                disp = cv2.applyColorMap(disp_vis, cv2.COLORMAP_INFERNO)
 
-        print("Validation KITTI EPE: %.4f, F1-all: %.4f" % (epe, f1))
-        results['kitti_epe'] = epe
-        results['kitti_f1'] = f1
+                skimage.io.imsave(output_filename, disp)
 
-        
-
-
-        
-
-        
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Hyperparams')
@@ -342,7 +331,26 @@ if __name__ == '__main__':
     #                     help='exclude very large disparity in the loss function')
     parser.add_argument('--debug', type=float, default=1)
     parser.add_argument('--visualization', type=float, default= 1)
-    parser.add_argument('--output_path', type=str, default= 'visualize')
+    parser.add_argument('--output_path', type=str, default= 'visualize/stereo')
+
+    parser.add_argument('--load_IGEV_path', nargs='?', type=str, default=None, help='path of ckp(saved by Pytorch)')
+    # use igev part
+    parser.add_argument('--IGEV',type = float,help= 'use unimatch stereo as dispnet', default = 1)
+    parser.add_argument('--mixed_precision', default=True, action='store_true', help='use mixed precision')
+    parser.add_argument('--train_iters', type=int, default=22, help="number of updates to the disparity field in each forward pass.")
+    parser.add_argument('--val_iters', type=int, default=32, help="number of updates to the disparity field in each forward pass.")
+    # IGEV Architecure choices
+    parser.add_argument('--corr_implementation', choices=["reg", "alt", "reg_cuda", "alt_cuda"], default="reg", help="correlation volume implementation")
+    parser.add_argument('--shared_backbone', action='store_true', help="use a single backbone for the context and feature encoders")
+    parser.add_argument('--corr_levels', type=int, default=2, help="number of levels in the correlation pyramid")
+    parser.add_argument('--corr_radius', type=int, default=4, help="width of the correlation pyramid")
+    parser.add_argument('--n_downsample', type=int, default=2, help="resolution of the disparity field (1/2^K)")
+    parser.add_argument('--slow_fast_gru', action='store_true', help="iterate the low-res GRUs more frequently")
+    parser.add_argument('--n_gru_layers', type=int, default=3, help="number of hidden GRU levels")
+    parser.add_argument('--hidden_dims', nargs='+', type=int, default=[128]*3, help="hidden state and context dimensions")
+    parser.add_argument('--max_disp', type=int, default=192, help="max disp of geometry encoding volume")
+    parser.add_argument('--valid_iters', type=int, default=16, help='number of flow-field updates during forward pass')
+
     args = parser.parse_args()
 
     

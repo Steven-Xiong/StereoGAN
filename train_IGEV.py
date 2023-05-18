@@ -320,6 +320,8 @@ def train(args):
         # optimizer_D_backward = optim.Adam(D_A_backward.parameters(), lr=args.lr_gan, betas=(0.5, 0.999))
     # start epoch赋初值
     start_epoch = 0
+    start_step=0
+
     if args.load_checkpoints:
         print('load optimizer')
         checkpoint = torch.load(args.load_IGEV_path,map_location = device)
@@ -328,6 +330,7 @@ def train(args):
             checkpoint_flow = torch.load(args.load_flownet_path,map_location = device)
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         start_epoch = checkpoint['epoch']+1
+        start_step = checkpoint['step']
         
         for state in optimizer.state.values():
             for k, v in state.items():
@@ -380,6 +383,20 @@ def train(args):
             # G_A_backward = nn.DataParallel(G_A_backward,device_ids=list(range(args.use_multi_gpu)))
             # D_A_forward = nn.DataParallel(D_A_forward, device_ids=list(range(args.use_multi_gpu)))
             # D_A_backward = nn.DataParallel(D_A_backward, device_ids=list(range(args.use_multi_gpu)))
+    
+    #add scheduler：
+    last_epoch = start_step if args.load_checkpoints and start_step > 0 else -1
+    scheduler = optim.lr_scheduler.OneCycleLR(optimizer, args.lr_rate, args.num_steps+100,
+            pct_start=0.01, cycle_momentum=False, anneal_strategy='linear',last_epoch=last_epoch)
+    lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(
+        optimizer_flow, args.lr_flow,
+        args.num_steps + 10,
+        pct_start=0.05,
+        cycle_momentum=False,
+        anneal_strategy='cos',
+        last_epoch=last_epoch,
+    )
+    total_steps = start_step
 
     net.to(device)
     G_AB.to(device)
@@ -427,6 +444,7 @@ def train(args):
 
     print('begin training...')
     print('start_epoch:', start_epoch)
+    print('start_step:', start_step)
     print('total_epoch:', args.total_epochs)
     best_val_d1 = 1.
     best_val_epe = 100.
@@ -798,7 +816,9 @@ def train(args):
             
             loss = loss0 + args.lambda_disp_warp*loss_disp_warp + args.lambda_disp_warp_inv*loss_disp_warp_inv  
             loss.backward()
+
             optimizer.step()
+            scheduler.step()
             # add optical flow: flow的image输入输出是否和stereo matching 任务一样？
 
             #left_A_forward用下一帧的右图生成
@@ -947,7 +967,9 @@ def train(args):
                 #print(loss)
                 loss_flow_all.backward()
                 optimizer_flow.step()
-
+                lr_scheduler.step()
+            
+            total_steps +=1
             if i % print_freq == print_freq - 1:
                 print('epoch[{}/{}]  step[{}/{}]  loss: {}'.format(epoch, args.total_epochs, i, len(trainloader), loss.item() ))
                 train_loss_meter.update(running_loss / print_freq)
@@ -1038,6 +1060,7 @@ def train(args):
             if args.flow:
                 torch.save({
                             'epoch': epoch,
+                            'step': total_steps,
                             'G_AB': G_AB.state_dict(),
                             'G_BA': G_BA.state_dict(),
                             'D_A': D_A.state_dict(),
@@ -1055,6 +1078,7 @@ def train(args):
             else:
                 torch.save({
                         'epoch': epoch,
+                        'step': total_steps,
                         'G_AB': G_AB.state_dict(),
                         'G_BA': G_BA.state_dict(),
                         'D_A': D_A.state_dict(),
@@ -1075,7 +1099,7 @@ if __name__ == '__main__':
 
     # training
     parser.add_argument('--lr_rate', nargs='?', type=float, default=1e-4, help='learning rate for dispnetc')
-    parser.add_argument('--lrepochs', type=str, default='40:2', help='the epochs to  lr: the downscale rate')
+    parser.add_argument('--lrepochs', type=str, default='30:4', help='the epochs to  lr: the downscale rate')
     parser.add_argument('--lr_gan', nargs='?', type=float, default=2e-4, help='learning rate for GAN')
     parser.add_argument('--train_ratio_gan', nargs='?', type=int, default=5, help='training ratio disp:gan=5:1')
     parser.add_argument('--batch_size', nargs='?', type=int, default=6, help='batch size')
@@ -1171,6 +1195,9 @@ if __name__ == '__main__':
     parser.add_argument('--n_gru_layers', type=int, default=3, help="number of hidden GRU levels")
     parser.add_argument('--hidden_dims', nargs='+', type=int, default=[128]*3, help="hidden state and context dimensions")
     parser.add_argument('--max_disp', type=int, default=192, help="max disp of geometry encoding volume")
+    
+    #add
+    parser.add_argument('--num_steps', nargs='?', type=int, default='200000')
 
     args = parser.parse_args()
     torch.manual_seed(3407)
