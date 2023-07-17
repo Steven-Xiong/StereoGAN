@@ -28,9 +28,17 @@ from consistency import apply_disparity,generate_image_left,generate_image_right
 import cv2 as cv
 #自己写的downsample
 from models.bilinear_sampler import downsample_optical_flow
-from IGEV.igev_stereo import IGEVStereo
-from IGEV.loss import sequence_loss, corr_loss
 
+from retrain.LEAStereo import LEAStereo
+
+from train_args import obtain_train_args
+from IGEV.loss import sequence_loss, corr_loss
+# RAFT
+import sys
+sys.path.append('core')
+from raft import RAFT
+from models.loss import sequence_loss_raft
+    
 def val(valloader, net, writer,iters, epoch=1, board_save=True):
     net.eval()
     EPEs, D1s, Thres1s, Thres2s, Thres3s = 0, 0, 0, 0, 0
@@ -41,8 +49,9 @@ def val(valloader, net, writer,iters, epoch=1, board_save=True):
         disp_gt = disp_gt.cuda()
         i = i + 1
         mask = (disp_gt < args.maxdisp) & (disp_gt > 0) #有的是0.5？
-        if args.IGEV:
-            disp_est = net(left_img, right_img, iters=iters, test_mode=True).squeeze(1)  #取最后一维度？
+        if args.LEA:
+            #import pdb; pdb.set_trace()
+            disp_est = net(left_img, right_img).squeeze(1)  #取最后一维度？
         else:
             disp_est = net(left_img, right_img)[0].squeeze(1)
         #import pdb; pdb.set_trace()
@@ -111,18 +120,19 @@ def val_flow(valloader, net_flow, writer, epoch=1, board_save=True):
         flow_gt = flow_gt.cuda()
         valid_gt = valid_gt.cuda()
         
-        results_dict = net_flow(left, left_forward,
-                                 attn_type=args.attn_type,
-                                 attn_splits_list=args.attn_splits_list,
-                                 corr_radius_list=args.corr_radius_list,
-                                 prop_radius_list=args.prop_radius_list,
-                                 num_reg_refine=args.num_reg_refine,
-                                 task='flow',
-                             )
+        # results_dict = net_flow(left, left_forward,
+        #                          attn_type=args.attn_type,
+        #                          attn_splits_list=args.attn_splits_list,
+        #                          corr_radius_list=args.corr_radius_list,
+        #                          prop_radius_list=args.prop_radius_list,
+        #                          num_reg_refine=args.num_reg_refine,
+        #                          task='flow',
+        #                      )
         
-        # useful when using parallel branches
-        flow_pr = results_dict['flow_preds']
-
+        # # useful when using parallel branches
+        # flow_pr = results_dict['flow_preds']
+        
+        flow_pr = net_flow(left, left_forward, iters=args.iters)
         #flow = padder.unpad(flow_pr[0]).cpu()
         flow = flow_pr[-1]
         #epe = torch.sum((flow - flow_gt) ** 2, dim=0).sqrt()
@@ -216,20 +226,26 @@ def train(args):
     # import IPython
     # IPython.embed()
     input_shape = (3, args.img_height, args.img_width)
-    if args.IGEV:
-        net = IGEVStereo(args)
+    # LEA part
+    #import pdb; pdb.set_trace()
+    #opt = obtain_train_args()
+    #print(opt)
+    
+    if args.LEA:
+        net = LEAStereo(args)
     else:                 
         net = dispnetcorr(args.maxdisp)
     # add optical flow module
     if args.flow:
-        net_flow = UniMatch(feature_channels=args.feature_channels,
-                     num_scales=args.num_scales,
-                     upsample_factor=args.upsample_factor,
-                     num_head=args.num_head,
-                     ffn_dim_expansion=args.ffn_dim_expansion,
-                     num_transformer_layers=args.num_transformer_layers,
-                     reg_refine=args.reg_refine,
-                     task='flow')
+        # net_flow = UniMatch(feature_channels=args.feature_channels,
+        #              num_scales=args.num_scales,
+        #              upsample_factor=args.upsample_factor,
+        #              num_head=args.num_head,
+        #              ffn_dim_expansion=args.ffn_dim_expansion,
+        #              num_transformer_layers=args.num_transformer_layers,
+        #              reg_refine=args.reg_refine,
+        #              task='flow')
+        net_flow = RAFT(args)
 
     G_AB = GeneratorResNet(input_shape, 2)    # 定义用到的generative model
     G_BA = GeneratorResNet(input_shape, 2)
@@ -245,8 +261,8 @@ def train(args):
     #     D_A_backward = Discriminator(3)
     if args.load_checkpoints:
         if args.load_from_mgpus_model:
-            if args.load_IGEV_path:
-                net = load_multi_gpu_checkpoint(net, args.load_IGEV_path, 'model')
+            if args.load_LEA_path:
+                net = load_multi_gpu_checkpoint(net, args.load_LEA_path, 'model')
             else:
                 pass
                 #net.apply(weights_init_normal)
@@ -266,7 +282,7 @@ def train(args):
             # D_A_backward = load_multi_gpu_checkpoint(D_A_backward,args.load_gan_path,'D_A_backward')
 
         else:
-            if args.load_IGEV_path:
+            if args.load_LEA_path:
                 net = load_checkpoint(net, args.load_checkpoint_path, device)
             else:
                 net.apply(weights_init_normal)
@@ -280,10 +296,7 @@ def train(args):
             D_A = load_checkpoint(D_A, args.load_gan_path, 'D_A')
             D_B = load_checkpoint(D_B, args.load_gan_path, 'D_B')
 
-            # G_A_forward = load_checkpoint(G_A_forward, args.load_gan_path,'G_A_forward')
-            # G_A_backward = load_checkpoint(G_A_backward, args.load_gan_path,'G_A_backward')
-            # D_A_forward = load_checkpoint(D_A_forward, args.load_gan_path,'D_A_forward')
-            # D_A_backward = load_checkpoint(D_A_backward,args.load_gan_path,'D_A_backward')
+     
 
     else:
         #net.apply(weights_init_normal)
@@ -294,19 +307,15 @@ def train(args):
         if args.debug:
             G_AB_debug.apply(weights_init_normal)
             G_BA_debug.apply(weights_init_normal)
-        if args.flow:
-            net_flow.apply(weights_init_normal)
-            # G_A_forward.apply(weights_init_normal)
-            # G_A_backward.apply(weights_init_normal)
-            # D_A_forward.apply(weights_init_normal)
-            # D_B_forward.apply(weights_init_normal)
+        # if args.flow:
+        #     net_flow.apply(weights_init_normal)
+            
 
     # optimizer = optim.SGD(params, momentum=0.9)
     #加载optimizer的
     
-    if args.IGEV:
-        optimizer = optim.AdamW(net.parameters(), lr=args.lr_rate,  #调一样不要整混
-                                weight_decay=args.weight_decay_IGEV, eps=1e-8)
+    if args.LEA:
+        optimizer = optim.Adam(net.parameters(), lr=args.lr, betas=(0.9,0.999))
     else:
         optimizer = optim.Adam(net.parameters(), lr=args.lr_rate, betas=(0.9, 0.999))
     optimizer_G = optim.Adam(itertools.chain(G_AB.parameters(), G_BA.parameters()), lr=args.lr_gan, betas=(0.5, 0.999))
@@ -324,7 +333,7 @@ def train(args):
 
     if args.load_checkpoints:
         print('load optimizer')
-        checkpoint = torch.load(args.load_IGEV_path,map_location = device)
+        checkpoint = torch.load(args.load_LEA_path,map_location = device)
         checkpoint_gan = torch.load(args.load_gan_path,map_location = device)
         if args.flow:
             checkpoint_flow = torch.load(args.load_flownet_path,map_location = device)
@@ -358,14 +367,6 @@ def train(args):
                     if torch.is_tensor(v):
                         state[k] = v.cuda()
 
-
-        # optimizer = load_multi_gpu_optimizer(args.load_IGEV_path,'optimizer_state_dict')
-        # optimizer_G = load_multi_gpu_optimizer(args.load_gan_path,'optimizer_G_state_dict')
-        # optimizer_D_A = load_multi_gpu_optimizer(args.load_gan_path,'optimizer_DA_state_dict')
-        # optimizer_D_B = load_multi_gpu_optimizer(args.load_gan_path,'optimizer_DB_state_dict')
-        # if args.flow:
-        #     optimizer_flow = load_multi_gpu_optimizer(args.load_flownet_path,'optimizer_flow_state_dict')
-        #import pdb; pdb.set_trace()
     
     if args.use_multi_gpu:
         print("Let's use", torch.cuda.device_count(), "GPUs!")
@@ -379,15 +380,12 @@ def train(args):
             G_BA_debug = nn.DataParallel(G_BA_debug,device_ids=list(range(args.use_multi_gpu)))
         if args.flow:
             net_flow = nn.DataParallel(net_flow, device_ids=list(range(args.use_multi_gpu)))
-            # G_A_forward = nn.DataParallel(G_A_forward,device_ids=list(range(args.use_multi_gpu)))
-            # G_A_backward = nn.DataParallel(G_A_backward,device_ids=list(range(args.use_multi_gpu)))
-            # D_A_forward = nn.DataParallel(D_A_forward, device_ids=list(range(args.use_multi_gpu)))
-            # D_A_backward = nn.DataParallel(D_A_backward, device_ids=list(range(args.use_multi_gpu)))
+         
     
     #add scheduler：
     last_epoch = start_step if args.load_checkpoints and start_step > 0 else -1
-    scheduler = optim.lr_scheduler.OneCycleLR(optimizer, args.lr_rate, args.num_steps+100,
-            pct_start=0.01, cycle_momentum=False, anneal_strategy='linear',last_epoch=last_epoch)
+    # scheduler = optim.lr_scheduler.OneCycleLR(optimizer, args.lr_rate, args.num_steps+100,
+    #         pct_start=0.01, cycle_momentum=False, anneal_strategy='linear',last_epoch=last_epoch)
     lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(
         optimizer_flow, args.lr_flow,
         args.num_steps + 10,
@@ -397,6 +395,9 @@ def train(args):
         last_epoch=last_epoch,
     )
     total_steps = start_step
+    # new scheduler?
+    
+    scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.milestones, gamma=0.5)
 
     net.to(device)
     G_AB.to(device)
@@ -408,10 +409,7 @@ def train(args):
         G_BA_debug.to(device)
     if args.flow:
         net_flow.to(device)
-        # G_A_forward.to(device)
-        # G_A_backward.to(device)
-        # D_A_forward.to(device)
-        # D_A_backward.to(device)
+      
 
     criterion_GAN = torch.nn.MSELoss().cuda()
     criterion_identity = torch.nn.L1Loss().cuda()
@@ -458,7 +456,7 @@ def train(args):
         # custom lr decay, or warm-up
         lr = args.lr_rate
         #TODO:改lr策略，用别的策略
-        if args.IGEV:
+        if args.LEA:
             pass
         else:
             if epoch >= int(args.lrepochs.split(':')[0]):
@@ -648,12 +646,13 @@ def train(args):
 
                 # corr loss
                 if args.lambda_corr:
-                    #要 extract feature: progressive refine loss
-                    if args.IGEV:
-                        corrB_init, corrB = net(leftB, rightB, iters = args.train_iters)
-                        corrB1_init, corrB1 = net(leftB, rec_rightB, iters = args.train_iters)
-                        corrB2_init, corrB2 = net(rec_leftB, rightB, iters = args.train_iters)
-                        corrB3_init, corrB3 = net(rec_leftB, rec_rightB,iters = args.train_iters)
+                    #要 extract feature : progressive refine loss
+                    if args.LEA:
+                        #import pdb; pdb.set_trace()
+                        corrB_init, corrB = net(leftB, rightB)
+                        corrB1_init, corrB1 = net(leftB, rec_rightB)
+                        corrB2_init, corrB2 = net(rec_leftB, rightB)
+                        corrB3_init, corrB3 = net(rec_leftB, rec_rightB)
                         #print(corrB[0].shape,corrB1[0].shape,corrB2[0].shape,corrB3[0].shape)
                         #import pdb; pdb.set_trace() #这里是带个[0]?
                         loss_corr1 = corr_loss(corrB1, corrB1_init, corrB, corrB_init, max_disp=args.max_disp)
@@ -712,8 +711,8 @@ def train(args):
                 
             # train disp net
             net.train()
-            if args.IGEV:
-                net.module.freeze_bn() # We keep BatchNorm frozen
+            # if args.IGEV:
+            #     net.module.freeze_bn() # We keep BatchNorm frozen
             G_AB.eval()
             G_BA.eval()
             if args.flow:
@@ -727,61 +726,7 @@ def train(args):
             # IPython.embed()
             
             loss_disp = 0
-            if args.IGEV:
-                # loss_disp = 0
-                disp_init_pred,pred_disps = net(G_AB(leftA), G_AB.forward(rightA),iters = args.train_iters)
-                #mport pdb; pdb.set_trace()
-
-                mask = (dispA < args.maxdisp) & (dispA > 0)
-                mask = mask.squeeze(1)
-                loss_disp, metrics = sequence_loss(pred_disps, disp_init_pred, dispA, mask, max_disp=args.max_disp)
-                loss0 = loss_disp
-                # loss weights
-                loss_disp_warp_inv =0
-                loss_disp_warp = 0
-                #print(len(pred_disps))
-                #print(pred_disps[0].shape, pred_disps[1].shape,pred_disps[2].shape,pred_disps[-1].shape)
-
-                if args.lambda_disp_warp_inv:
-                    
-                    loss_gamma = 0.9
-                    n_predictions = len(pred_disps)
-                    for i in range(n_predictions-3, n_predictions):
-                        
-                        adjusted_loss_gamma = loss_gamma**(15/(n_predictions - 1))
-                        i_weight = adjusted_loss_gamma**(n_predictions - i - 1)
-                        disp_warp = -pred_disps[i]
-                        #print(fake_leftA_feats[0][0].shape)
-                        if args.debug:
-                            fake_leftA_warp,loss_disp_warp_inv1 = G_BA_debug(rightB, disp_warp, True, [x.detach() for x in fake_leftA_feats])
-                        else:
-                            fake_leftA_warp,loss_disp_warp_inv1 = G_BA(rightB, disp_warp, True, [x.detach() for x in fake_leftA_feats])
-                            #loss_disp_warp_inv = G_BA(rightB, disp_warp, True, fake_leftA[-1].detach())
-                        #print(loss_disp_warp_inv)
-                        #import pdb; pdb.set_trace()
-                        loss_disp_warp_inv += loss_disp_warp_inv1.mean()*i_weight
-                        #print(loss_disp_warp_inv)
-                else:
-                    loss_disp_warp_inv = 0
-                #import pdb; pdb.set_trace()
-                if args.lambda_disp_warp:
-                    loss_gamma = 0.9
-                    n_predictions = len(pred_disps)
-                    for i in range(n_predictions-3, n_predictions):
-                        adjusted_loss_gamma = loss_gamma**(15/(n_predictions - 1))
-                        i_weight = adjusted_loss_gamma**(n_predictions - i - 1)
-                        disp_warp = pred_disps[i] # len:4 shape:[1,1,256,512],[1,1,128,256],[1,1,64,128],[1,1,32,64]
-                        if args.debug:
-                            fake_rightA_warp, loss_disp_warp1 = G_BA_debug(leftB, disp_warp, True, [x.detach() for x in fake_rightA_feats])
-                        else:
-                            fake_rightA_warp, loss_disp_warp1 = G_BA(leftB, disp_warp, True, [x.detach() for x in fake_rightA_feats])
-                            #loss_disp_warp = G_BA(leftB, disp_warp, True, fake_rightA[-1].detach())
-                        loss_disp_warp += loss_disp_warp1.mean()*i_weight
-                else:
-                    loss_disp_warp = 0   
-
-            else:
-                #import pdb; pdb.set_trace()
+            if args.LEA:
                 disp_ests = net(G_AB(leftA), G_AB.forward(rightA))  #各种feature, len=7
         
                 # 加自己的predA_disp跟predB_disp之间的loss
@@ -793,26 +738,31 @@ def train(args):
                 #print('disp_ests[0]:',disp_ests[0].squeeze(1).shape)
                 mask = (dispA < args.maxdisp) & (dispA > 0)
                 #print(disp_ests.shape, dispA.shape)
+                mask = mask.squeeze(1)
+                dispA = dispA.squeeze(1)
                 #import pdb; pdb.set_trace()
-                loss0 = model_loss0(disp_ests, dispA, mask)
+                loss0 = F.smooth_l1_loss(disp_ests[mask], dispA[mask], reduction='mean')
 
                 if args.lambda_disp_warp_inv:
                     
-                    disp_warp = [-disp_ests[i] for i in range(3)] 
+                    disp_warp = -disp_ests
+                    #import pdb; pdb.set_trace()
                     #print(fake_leftA_feats[0][0].shape)
-                    loss_disp_warp_inv = G_BA(rightB, disp_warp, True, [x.detach() for x in fake_leftA_feats])
+                    fake_leftA_warp,loss_disp_warp_inv1 = G_BA(rightB, disp_warp, True, [x.detach() for x in fake_leftA_feats])
                     #print(loss_disp_warp_inv)
                     #import pdb; pdb.set_trace()
-                    loss_disp_warp_inv = loss_disp_warp_inv.mean()
+                    loss_disp_warp_inv = loss_disp_warp_inv1.mean()
                 else:
                     loss_disp_warp_inv = 0
 
                 if args.lambda_disp_warp:
-                    disp_warp = [disp_ests[i] for i in range(3)] # len:4 shape:[1,1,256,512],[1,1,128,256],[1,1,64,128],[1,1,32,64]
-                    loss_disp_warp = G_BA(leftB, disp_warp, True, [x.detach() for x in fake_rightA_feats])
-                    loss_disp_warp = loss_disp_warp.mean()
+                    disp_warp = disp_ests # len:4 shape:[1,1,256,512],[1,1,128,256],[1,1,64,128],[1,1,32,64]
+                    fake_rightA_warp, loss_disp_warp1 = G_BA(leftB, disp_warp, True, [x.detach() for x in fake_rightA_feats])
+                    loss_disp_warp = loss_disp_warp1.mean()
                 else:
                     loss_disp_warp = 0
+
+        
             
             loss = loss0 + args.lambda_disp_warp*loss_disp_warp + args.lambda_disp_warp_inv*loss_disp_warp_inv  
             loss.backward()
@@ -831,16 +781,18 @@ def train(args):
             loss_flow_all=0
             if args.flow:
                 #print(G_AB(leftA).shape, G_AB.forward(leftA_forward).shape)
-                results_dict = net_flow(G_AB(leftA), G_AB.forward(leftA_forward),
-                                 attn_type=args.attn_type,
-                                 attn_splits_list=args.attn_splits_list,
-                                 corr_radius_list=args.corr_radius_list,
-                                 prop_radius_list=args.prop_radius_list,
-                                 num_reg_refine=args.num_reg_refine,
-                                 task='flow',
-                                 )
+                # results_dict = net_flow(G_AB(leftA), G_AB.forward(leftA_forward),
+                #                  attn_type=args.attn_type,
+                #                  attn_splits_list=args.attn_splits_list,
+                #                  corr_radius_list=args.corr_radius_list,
+                #                  prop_radius_list=args.prop_radius_list,
+                #                  num_reg_refine=args.num_reg_refine,
+                #                  task='flow',
+                #                  )
                 #import pdb; pdb.set_trace()
-                flow_preds = results_dict['flow_preds']   #这里存flow pred模型
+                flow_preds = net_flow(G_AB(leftA), G_AB.forward(leftA_forward), iters=args.iters)  
+                #import pdb; pdb.set_trace()
+                #flow_preds = results_dict['flow_preds']   #这里存flow pred模型
                                                         # flow_gt shape:[1,2,320,1152] valid shape:[1,320,1152]
                 
                 
@@ -859,10 +811,11 @@ def train(args):
 
                 validA = validA.float()  #解决这里
                 #print('validA.shape',validA.shape)
-                loss_flow, metrics = flow_loss_func(flow_preds, flowA, validA,
-                                            gamma=args.gamma,
-                                            max_flow=args.max_flow,
-                                            )
+                # loss_flow, metrics = flow_loss_func(flow_preds, flowA, validA,
+                #                             gamma=args.gamma,
+                #                             max_flow=args.max_flow,
+                #                             )
+                loss_flow, metrics = sequence_loss_raft(flow_preds, flowA, validA, args.gamma, max_flow=args.max_flow)
             else:
                 loss_flow, metrics= 0, 0
             if args.smooth_loss:
@@ -891,7 +844,7 @@ def train(args):
                     # flow_inv_warpx = [-flow_inv_warpx[i] for i in range(3)]
                     # flow_inv_warpy = [-flow_inv_warpy[i] for i in range(3)]
                     # leftB_forward+inv_flow之后，得到warp之后的warped_leftB, 和fake_leftA的feature做loss
-                    gamma = 0.9
+                    gamma = args.gamma #RAFT用0.8
                     n_predictions = len(flow_preds) 
                     for i in range(n_predictions):
                         i_weight = gamma ** (n_predictions - i - 1)
@@ -935,7 +888,7 @@ def train(args):
                     #import pdb; pdb.set_trace()
                     #这里应当是leftB_forward? 不对，warp得到的应该是预测的flow. leftB 到fake_leftA_forward_feats
                     # leftB_forward 到fake_leftA_feats
-                    gamma = 0.9
+                    gamma = args.gamma #RAFT用0.8
                     n_predictions = len(flow_preds)
                     #import pdb; pdb.set_trace()
                     for i in range(n_predictions):
@@ -1041,6 +994,7 @@ def train(args):
                     writer.add_image('warp/fakeB_R_warp', fakeB_warp_R_visual, i)
         # TODO: 加 optical flow的evaluation metrics,看能不能相互促进
         with torch.no_grad():
+            #import pdb; pdb.set_trace()
             EPE, D1,Thres1s,Thres2s,Thres3s = val(valloader, net, writer,iters = args.val_iters, epoch=epoch, board_save=True)
             if args.flow:
                 epe_flow, f1_all, epe1_flow, fl_all1 = val_flow(valloader, net_flow, writer, epoch=epoch, board_save=True)
@@ -1090,6 +1044,9 @@ def train(args):
                         'optimizer_state_dict': optimizer.state_dict(),
                         }, args.checkpoint_save_path + '/ep' + str(epoch) + '_D1_{:.4f}_EPE{:.4f}_Thres2s{:.4f}_Thres4s{:.4f}_Thres5s{:.4f}'.format(D1, EPE,Thres1s,Thres2s,Thres3s) + '.pth')
 
+
+
+    
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Hyperparams')
     # dataset
@@ -1130,7 +1087,7 @@ if __name__ == '__main__':
     parser.add_argument('--load_checkpoints', nargs='?', type=int, default=0, help='load from ckp(saved by Pytorch)')
     parser.add_argument('--load_from_mgpus_model', nargs='?', type=int, default=0, help='load ckp which is saved by mgus(nn.DataParallel)')
     parser.add_argument('--load_gan_path', nargs='?', type=str, default=None, help='path of ckp(saved by Pytorch)')
-    parser.add_argument('--load_IGEV_path', nargs='?', type=str, default=None, help='path of ckp(saved by Pytorch)')
+    parser.add_argument('--load_LEA_path', nargs='?', type=str, default=None, help='path of ckp(saved by Pytorch)')
     parser.add_argument('--checkpoint_save_path', nargs='?', type=str, default='checkpoints/best_checkpoint.pth.tar')
     parser.add_argument('--load_flownet_path', nargs='?', type=str, default=None, help='path of ckp(saved by Pytorch)')
     # tensorboard, print freq
@@ -1169,15 +1126,15 @@ if __name__ == '__main__':
     parser.add_argument('--num_reg_refine', default=1, type=int,
                         help='number of additional local regression refinement')
     
-    parser.add_argument('--gamma', default=0.9, type=float,
-                        help='exponential weighting')
+    # parser.add_argument('--gamma', default=0.9, type=float,
+    #                     help='exponential weighting')
     parser.add_argument('--max_flow', default=400, type=int,
                         help='exclude very large motions during training')
     parser.add_argument('--lr_flow', nargs='?', type=float, default=1e-4, help='learning rate for unimatch flow')
     parser.add_argument('--weight_decay', default=1e-4, type=float)
 
     # use igev part
-    parser.add_argument('--IGEV',type = float,help= 'use unimatch stereo as dispnet', default = 1)
+    parser.add_argument('--LEA',type = float,help= 'use unimatch stereo as dispnet', default = 1)
     parser.add_argument('--mixed_precision', default=True, action='store_true', help='use mixed precision')
     parser.add_argument('--train_iters', type=int, default=22, help="number of updates to the disparity field in each forward pass.")
     parser.add_argument('--val_iters', type=int, default=32, help="number of updates to the disparity field in each forward pass.")
@@ -1198,7 +1155,79 @@ if __name__ == '__main__':
     
     #add
     parser.add_argument('--num_steps', nargs='?', type=int, default='200000')
+    
+    
+    # parser.add_argument('--maxdisp', type=int, default=192, 
+    #                     help="max disp")
+    parser.add_argument('--crop_height', type=int, default=256, 
+                        help="crop height")
+    parser.add_argument('--crop_width', type=int, default =512, 
+                        help="crop width")
+    parser.add_argument('--resume', type=str, default='', 
+                        help="resume from saved model")
+    # parser.add_argument('--batch_size', type=int, default=1, 
+    #                     help='training batch size')
+    parser.add_argument('--testBatchSize', type=int, default=8, 
+                        help='testing batch size')
+    parser.add_argument('--nEpochs', type=int, default=2048, 
+                        help='number of epochs to train for')
+    parser.add_argument('--solver', default='adam',choices=['adam','sgd'],
+                        help='solver algorithms')
+    parser.add_argument('--lr', type=float, default=0.001, 
+                        help='Learning Rate. Default=0.001')
+    parser.add_argument('--cuda', type=int, default=1, 
+                        help='use cuda? Default=True')
+    parser.add_argument('--threads', type=int, default=1, 
+                        help='number of threads for data loader to use')
+    parser.add_argument('--seed', type=int, default=2019, 
+                        help='random seed to use. Default=123')
+    parser.add_argument('--shift', type=int, default=0, 
+                        help='random shift of left image. Default=0')
+    parser.add_argument('--save_path', type=str, default='./checkpoints/', 
+                        help="location to save models")
+    parser.add_argument('--milestones', default=[30,50,300], metavar='N', nargs='*', 
+                        help='epochs at which learning rate is divided by 2')    
+    parser.add_argument('--stage', type=str, default='train', choices=['search', 'train'])
+    parser.add_argument('--dataset', type=str, default='sceneflow', 
+                        choices=['sceneflow', 'kitti15', 'kitti12', 'middlebury'], help='dataset name')
 
+    ######### LEStereo params ##################
+    parser.add_argument('--fea_num_layers', type=int, default=6)
+    parser.add_argument('--mat_num_layers', type=int, default=12)
+    parser.add_argument('--fea_filter_multiplier', type=int, default=8)
+    parser.add_argument('--mat_filter_multiplier', type=int, default=8)
+    parser.add_argument('--fea_block_multiplier', type=int, default=4)
+    parser.add_argument('--mat_block_multiplier', type=int, default=4)
+    parser.add_argument('--fea_step', type=int, default=2)
+    parser.add_argument('--mat_step', type=int, default=2)
+    parser.add_argument('--net_arch_fea', default='pretrained_LEA/sceneflow/experiment/feature_network_path.npy', type=str)
+    parser.add_argument('--cell_arch_fea', default='pretrained_LEA/sceneflow/experiment/feature_genotype.npy', type=str)
+    parser.add_argument('--net_arch_mat', default='pretrained_LEA/sceneflow/experiment/matching_network_path.npy', type=str)
+    parser.add_argument('--cell_arch_mat', default='pretrained_LEA/sceneflow/experiment/matching_genotype.npy', type=str)
+
+    # RAFT
+    
+    parser.add_argument('--name', default='raft', help="name your experiment")
+    parser.add_argument('--stage_RFAT', help="determines which dataset to use for training") #原为stage，冲突了
+    parser.add_argument('--restore_ckpt', help="restore checkpoint")
+    parser.add_argument('--small', action='store_true', help='use small model')
+    parser.add_argument('--validation', type=str, nargs='+')
+
+    #parser.add_argument('--lr', type=float, default=0.00002)
+    #parser.add_argument('--num_steps', type=int, default=100000)
+    #parser.add_argument('--batch_size', type=int, default=6)
+    parser.add_argument('--image_size', type=int, nargs='+', default=[384, 512])
+    parser.add_argument('--gpus', type=int, nargs='+', default=[0,1])
+    #parser.add_argument('--mixed_precision', action='store_true', help='use mixed precision')
+
+    parser.add_argument('--iters', type=int, default=12)
+    parser.add_argument('--wdecay', type=float, default=.00005)
+    parser.add_argument('--epsilon', type=float, default=1e-8)
+    parser.add_argument('--clip', type=float, default=1.0)
+    parser.add_argument('--dropout', type=float, default=0.0)
+    parser.add_argument('--gamma', type=float, default=0.8, help='exponential weighting')
+    parser.add_argument('--add_noise', action='store_true')
+    
     args = parser.parse_args()
     torch.manual_seed(3407)
     np.random.seed(3407)

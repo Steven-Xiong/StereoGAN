@@ -172,11 +172,11 @@ class ImageDataset(Dataset):
 
 # for validation
 class ValJointImageDataset(Dataset):
-    def __init__(self, root='data/kitti_15', transforms_=None, input_shape=(3, 384, 1280)):
+    def __init__(self, root='data/kitti_15', transforms_=None, input_shape=(3, 384, 1248)):  #(3, 384, 1280)
         f = open('./filenames/kitti15_adv_flow_val.txt', 'r')
         mean = [0.5, 0.5, 0.5]
         std = [0.5, 0.5, 0.5]
-        channels, height, width = input_shape
+        channels, self.height, self.width = input_shape
         transforms_ = [transforms.ToTensor(),
                        transforms.Normalize(mean=mean, std=std)]
         self.transform = transforms.Compose(transforms_)
@@ -223,8 +223,8 @@ class ValJointImageDataset(Dataset):
         left_forward = self.load_image(self.left_forward_files[index])
         flow,valid = self.load_flowB(self.flow_files[index])  #B 返回flow和对应valid值
         
-        top_pad = 384 - shape[0]
-        right_pad = 1280 - shape[1]    #1280
+        top_pad = self.height - shape[0]
+        right_pad = self.width - shape[1]    #1280
         assert top_pad > 0 and right_pad > 0
         # pad disparity gt
         #print('disp.shape',disp.shape)
@@ -401,11 +401,11 @@ class ImageDataset2(Dataset):
     
 # for validation
 class ValJointImageDataset2(Dataset):
-    def __init__(self, root='data/kitti_15', transforms_=None, input_shape=(3, 384, 1280)):
+    def __init__(self, root='data/kitti_15', transforms_=None, input_shape=(3, 384, 1248)):
         f = open('./filenames/kitti15_adv_flow_val.txt', 'r')
         mean = [0.5, 0.5, 0.5]
         std = [0.5, 0.5, 0.5]
-        channels, height, width = input_shape
+        channels, self.height, self.width = input_shape
         transforms_ = [transforms.ToTensor(),
                        transforms.Normalize(mean=mean, std=std)]
         self.transform = transforms.Compose(transforms_)

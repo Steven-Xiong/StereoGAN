@@ -158,7 +158,7 @@ def train(args):
         raise "No suportive dataset"
     #import pdb; pdb.set_trace()
     #dataset.get_item(1)
-    trainloader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=16)
+    trainloader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=16)
     valdataset = ValJointImageDataset()
     valloader = torch.utils.data.DataLoader(valdataset, batch_size=args.test_batch_size, shuffle=False, num_workers=16)
 
