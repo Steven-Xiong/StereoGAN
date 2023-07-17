@@ -270,7 +270,8 @@ def train(args):
                 if args.load_flownet_path:
                     net_flow = load_multi_gpu_checkpoint(net_flow,args.load_flownet_path,'model_flow')
                 else:
-                    net_flow.apply(weights_init_normal)
+                    pass
+                    #net_flow.apply(weights_init_normal)
             G_AB = load_multi_gpu_checkpoint(G_AB, args.load_gan_path, 'G_AB')
             G_BA = load_multi_gpu_checkpoint(G_BA, args.load_gan_path, 'G_BA')
             D_A = load_multi_gpu_checkpoint(D_A, args.load_gan_path, 'D_A')
@@ -333,13 +334,13 @@ def train(args):
 
     if args.load_checkpoints:
         print('load optimizer')
-        checkpoint = torch.load(args.load_LEA_path,map_location = device)
+        #checkpoint = torch.load(args.load_LEA_path,map_location = device)
         checkpoint_gan = torch.load(args.load_gan_path,map_location = device)
-        if args.flow:
-            checkpoint_flow = torch.load(args.load_flownet_path,map_location = device)
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        start_epoch = checkpoint['epoch']+1
-        start_step = checkpoint['step']
+        # if args.flow:
+        #     checkpoint_flow = torch.load(args.load_flownet_path,map_location = device)
+        #optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        start_epoch = 0 #checkpoint_gan['epoch']+1
+        start_step = 0 #checkpoint['step']
         
         for state in optimizer.state.values():
             for k, v in state.items():
@@ -360,12 +361,12 @@ def train(args):
             for k, v in state.items():
                 if torch.is_tensor(v):
                     state[k] = v.cuda()
-        if args.flow:
-            optimizer_flow.load_state_dict(checkpoint_flow['optimizer_flow_state_dict'])
-            for state in optimizer_flow.state.values():
-                for k, v in state.items():
-                    if torch.is_tensor(v):
-                        state[k] = v.cuda()
+        # if args.flow:
+        #     optimizer_flow.load_state_dict(checkpoint_flow['optimizer_flow_state_dict'])
+        #     for state in optimizer_flow.state.values():
+        #         for k, v in state.items():
+        #             if torch.is_tensor(v):
+        #                 state[k] = v.cuda()
 
     
     if args.use_multi_gpu:

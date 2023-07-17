@@ -15,8 +15,8 @@ python -u train_rebuttle.py \
 --save_interval=5 \
 --print_freq=5 \
 --checkpoint_save_path="stereogan_checkpoints/${model_name}" \
---load_checkpoints 0 \
---load_from_mgpus_model 0 \
+--load_checkpoints 1 \
+--load_from_mgpus_model 1 \
 --writer=${model_name} \
 --use_multi_gpu=2 \
 --img_height=288 \
@@ -43,9 +43,9 @@ python -u train_rebuttle.py \
 --lr_flow=5e-5 \
 --LEA 1 \
 --lambda_flow_warp 0 \
---lambda_flow_warp_inv 2 \
+--lambda_flow_warp_inv 5 \
 --lambda_flow_warpx 0 \
---lambda_flow_warpx_inv 2 \
+--lambda_flow_warpx_inv 5 \
 --debug 0 \
 --load_gan_path 'stereogan_checkpoints/gan_driving_withflow_5.24_epoch30/ep30.pth' \
 #2>&1 | tee ./logs/train-$model_name-$now.log &
