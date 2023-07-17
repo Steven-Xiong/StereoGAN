@@ -47,7 +47,7 @@ python -u train_IGEV.py \
 --lambda_flow_warpx 0 \
 --lambda_flow_warpx_inv 2 \
 --debug 0 \
-2>&1 | tee ./logs/train-$model_name-$now.log &
+#2>&1 | tee ./logs/train-$model_name-$now.log &
 #--load_gan_path 'stereogan_checkpoints/gan_VKITTI2_withflow_fix/ep10.pth' \
 # --load_IGEV_path 'stereogan_checkpoints/VKITTI2_ep80_IGEVlr2e-4_IGEV_pretrain/ep30_D1_0.0330_EPE0.9370_Thres2s0.0713_Thres4s0.0243_Thres5s0.0196.pth' \
 # --load_flownet_path 'stereogan_checkpoints/VKITTI2_GMflow_pretrain/ep29_epe_flow3.6163_f1_all0.1484_epe1_flow6.0657_fl_all10.2181.pth' \

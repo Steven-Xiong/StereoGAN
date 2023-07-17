@@ -650,6 +650,7 @@ def train(args):
                 if args.lambda_corr:
                     #要 extract feature: progressive refine loss
                     if args.IGEV:
+                        import pdb; pdb.set_trace()
                         corrB_init, corrB = net(leftB, rightB, iters = args.train_iters)
                         corrB1_init, corrB1 = net(leftB, rec_rightB, iters = args.train_iters)
                         corrB2_init, corrB2 = net(rec_leftB, rightB, iters = args.train_iters)

@@ -649,17 +649,16 @@ def train(args):
                 if args.lambda_corr:
                     #要 extract feature : progressive refine loss
                     if args.LEA:
+                        import pdb; pdb.set_trace()
+                        corrB = net(leftB, rightB) #shape[n_gpu,41,64,128]
+                        #print(corrB[0].shape,corrB[1].shape)
+                        
+                        corrB1 = net(leftB, rec_rightB)
+                        corrB2 = net(rec_leftB, rightB)
+                        corrB3 = net(rec_leftB, rec_rightB)
+                        
                         #import pdb; pdb.set_trace()
-                        corrB_init, corrB = net(leftB, rightB)
-                        corrB1_init, corrB1 = net(leftB, rec_rightB)
-                        corrB2_init, corrB2 = net(rec_leftB, rightB)
-                        corrB3_init, corrB3 = net(rec_leftB, rec_rightB)
-                        #print(corrB[0].shape,corrB1[0].shape,corrB2[0].shape,corrB3[0].shape)
-                        #import pdb; pdb.set_trace() #这里是带个[0]?
-                        loss_corr1 = corr_loss(corrB1, corrB1_init, corrB, corrB_init, max_disp=args.max_disp)
-                        loss_corr2 = corr_loss(corrB2, corrB2_init, corrB, corrB_init, max_disp=args.max_disp)
-                        loss_corr3 = corr_loss(corrB3, corrB3_init, corrB, corrB_init, max_disp=args.max_disp)
-                        loss_corr = (loss_corr1+loss_corr2+loss_corr3)/3
+                        loss_corr = (criterion_identity(corrB1, corrB)+criterion_identity(corrB2, corrB)+criterion_identity(corrB3, corrB))/3
                         
                     else:
                         #import pdb; pdb.set_trace()
